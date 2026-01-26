@@ -3,7 +3,6 @@
 import shutil
 import subprocess
 from abc import ABC, abstractmethod
-from typing import Any
 
 import click
 
@@ -23,6 +22,17 @@ class PackageManager(ABC):
     @abstractmethod
     def install(cls, package: str, dry_run: bool = False) -> bool:
         """Install a package. Returns True on success."""
+        pass
+
+    @classmethod
+    @abstractmethod
+    def install_batch(
+        cls, packages: list[str], dry_run: bool = False
+    ) -> tuple[list[str], list[str]]:
+        """Install multiple packages at once.
+
+        Returns (successful, failed) tuple of package lists.
+        """
         pass
 
     @classmethod
@@ -58,6 +68,36 @@ class AptManager(PackageManager):
             return True
         except subprocess.CalledProcessError:
             return False
+
+    @classmethod
+    def install_batch(
+        cls, packages: list[str], dry_run: bool = False
+    ) -> tuple[list[str], list[str]]:
+        # Filter out already installed packages
+        to_install = [p for p in packages if not cls.is_installed(p)]
+        already_installed = [p for p in packages if cls.is_installed(p)]
+
+        if not to_install:
+            return packages, []
+
+        cmd = ["sudo", "apt", "install", "-y"] + to_install
+        if dry_run:
+            click.echo(f"    Would run: {' '.join(cmd)}")
+            return packages, []
+
+        try:
+            subprocess.run(cmd, check=True)
+            return packages, []
+        except subprocess.CalledProcessError:
+            # Fall back to individual installation to identify failures
+            successful = list(already_installed)
+            failed = []
+            for pkg in to_install:
+                if cls.install(pkg, dry_run=False):
+                    successful.append(pkg)
+                else:
+                    failed.append(pkg)
+            return successful, failed
 
     @classmethod
     def is_installed(cls, package: str) -> bool:
@@ -102,6 +142,37 @@ class SnapManager(PackageManager):
             return False
 
     @classmethod
+    def install_batch(
+        cls, packages: list[str], dry_run: bool = False
+    ) -> tuple[list[str], list[str]]:
+        # Filter out already installed packages
+        to_install = [p for p in packages if not cls.is_installed(p)]
+        already_installed = [p for p in packages if cls.is_installed(p)]
+
+        if not to_install:
+            return packages, []
+
+        # Snap can install multiple packages at once
+        cmd = ["sudo", "snap", "install"] + to_install
+        if dry_run:
+            click.echo(f"    Would run: {' '.join(cmd)}")
+            return packages, []
+
+        try:
+            subprocess.run(cmd, check=True)
+            return packages, []
+        except subprocess.CalledProcessError:
+            # Fall back to individual installation to identify failures
+            successful = list(already_installed)
+            failed = []
+            for pkg in to_install:
+                if cls.install(pkg, dry_run=False):
+                    successful.append(pkg)
+                else:
+                    failed.append(pkg)
+            return successful, failed
+
+    @classmethod
     def is_installed(cls, package: str) -> bool:
         result = subprocess.run(
             ["snap", "list", package],
@@ -142,6 +213,22 @@ class CargoManager(PackageManager):
             return True
         except subprocess.CalledProcessError:
             return False
+
+    @classmethod
+    def install_batch(
+        cls, packages: list[str], dry_run: bool = False
+    ) -> tuple[list[str], list[str]]:
+        # Cargo doesn't batch well, install sequentially
+        successful = []
+        failed = []
+        for pkg in packages:
+            if cls.is_installed(pkg):
+                successful.append(pkg)
+            elif cls.install(pkg, dry_run=dry_run):
+                successful.append(pkg)
+            else:
+                failed.append(pkg)
+        return successful, failed
 
     @classmethod
     def is_installed(cls, package: str) -> bool:
@@ -192,6 +279,37 @@ class NpmManager(PackageManager):
             return False
 
     @classmethod
+    def install_batch(
+        cls, packages: list[str], dry_run: bool = False
+    ) -> tuple[list[str], list[str]]:
+        # Filter out already installed packages
+        to_install = [p for p in packages if not cls.is_installed(p)]
+        already_installed = [p for p in packages if cls.is_installed(p)]
+
+        if not to_install:
+            return packages, []
+
+        # npm can install multiple packages at once
+        cmd = ["npm", "install", "-g"] + to_install
+        if dry_run:
+            click.echo(f"    Would run: {' '.join(cmd)}")
+            return packages, []
+
+        try:
+            subprocess.run(cmd, check=True)
+            return packages, []
+        except subprocess.CalledProcessError:
+            # Fall back to individual installation to identify failures
+            successful = list(already_installed)
+            failed = []
+            for pkg in to_install:
+                if cls.install(pkg, dry_run=False):
+                    successful.append(pkg)
+                else:
+                    failed.append(pkg)
+            return successful, failed
+
+    @classmethod
     def is_installed(cls, package: str) -> bool:
         result = subprocess.run(
             ["npm", "list", "-g", package, "--depth=0"],
@@ -227,51 +345,34 @@ def get_available_managers() -> list[str]:
 
 
 def install_apps(
-    apps: dict[str, dict[str, Any]],
-    preference: list[str],
+    apps: dict[str, list[str]],
     dry_run: bool = False,
 ) -> None:
-    """Install applications using preferred package managers.
+    """Install applications grouped by package manager.
 
     Args:
-        apps: Dict of app_name -> app_config (may include 'prefer' key)
-        preference: Global preference order of package managers
+        apps: Dict of manager_name -> list of package names
         dry_run: If True, only show what would be done
     """
     available = get_available_managers()
 
-    for app_name, app_config in apps.items():
-        # Determine manager preference for this app
-        app_prefer = app_config.get("prefer")
-        if app_prefer and app_prefer in available:
-            managers_to_try = [app_prefer]
-        else:
-            managers_to_try = [m for m in preference if m in available]
-
-        if not managers_to_try:
-            click.secho(f"  No package manager for: {app_name}", fg="red")
+    for manager_name, packages in apps.items():
+        if not packages or not isinstance(packages, list):
             continue
 
-        # Try to install with first available manager
-        installed = False
-        for mgr_name in managers_to_try:
-            mgr = MANAGERS[mgr_name]
+        if manager_name not in available:
+            click.secho(f"  Package manager not available: {manager_name}", fg="red")
+            for pkg in packages:
+                click.secho(f"    Skipping: {pkg}", fg="yellow")
+            continue
 
-            # Check if already installed
-            if mgr.is_installed(app_name):
-                click.echo(f"  {app_name}: already installed ({mgr_name})")
-                installed = True
-                break
+        mgr = MANAGERS[manager_name]
+        click.echo(f"  Installing via {manager_name}: {', '.join(packages)}")
 
-            # Try to install
-            click.echo(f"  {app_name}: installing via {mgr_name}...")
-            if mgr.install(app_name, dry_run=dry_run):
-                installed = True
-                if not dry_run:
-                    click.secho(f"  {app_name}: installed", fg="green")
-                break
-            else:
-                click.secho(f"  {app_name}: failed via {mgr_name}", fg="yellow")
+        successful, failed = mgr.install_batch(packages, dry_run=dry_run)
 
-        if not installed and not dry_run:
-            click.secho(f"  {app_name}: could not install", fg="red")
+        if not dry_run:
+            for pkg in successful:
+                click.secho(f"    {pkg}: installed", fg="green")
+            for pkg in failed:
+                click.secho(f"    {pkg}: failed", fg="red")

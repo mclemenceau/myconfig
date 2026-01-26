@@ -187,11 +187,11 @@ def remote_deploy(
             if result.returncode != 0:
                 click.secho(f"  Warning: {result.stderr}", fg="yellow")
 
-    # Install packages
+    # Install packages (grouped by manager)
     apps = resolved.get("apps", {})
     if apps:
-        click.echo(f"  Installing {len(apps)} app(s)...")
-        preference = config["package_managers"]["preference"]
+        total = sum(len(pkgs) for pkgs in apps.values() if isinstance(pkgs, list))
+        click.echo(f"  Installing {total} app(s)...")
 
         # Check if passwordless sudo is available
         sudo_check = ssh_exec(
@@ -210,47 +210,64 @@ def remote_deploy(
                 "for non-interactive deploys)"
             )
 
-        for app_name, app_config in apps.items():
-            prefer = app_config.get("prefer")
-            if prefer:
-                managers = [prefer]
+        for manager, packages in apps.items():
+            if not packages or not isinstance(packages, list):
+                continue
+
+            click.echo(f"    Installing via {manager}: {', '.join(packages)}")
+
+            if manager == "apt":
+                cmd = f"sudo apt install -y {' '.join(packages)}"
+                needs_tty = needs_sudo_password
+            elif manager == "snap":
+                cmd = f"sudo snap install {' '.join(packages)}"
+                needs_tty = needs_sudo_password
+            elif manager == "cargo":
+                # Cargo doesn't batch well, install sequentially
+                for pkg in packages:
+                    cargo_cmd = f"cargo install {pkg}"
+                    result = ssh_exec(
+                        user, host, port, cargo_cmd, key_path, check=False
+                    )
+                    if result.returncode == 0:
+                        click.secho(f"      {pkg}: installed", fg="green")
+                    else:
+                        click.secho(f"      {pkg}: failed", fg="red")
+                continue
+            elif manager == "npm":
+                cmd = f"npm install -g {' '.join(packages)}"
+                needs_tty = False
             else:
-                managers = preference
+                click.secho(f"    Unknown manager: {manager}", fg="yellow")
+                continue
 
-            installed = False
-            for mgr in managers:
-                if mgr == "apt":
-                    cmd = f"sudo apt install -y {app_name}"
-                    needs_tty = needs_sudo_password
-                elif mgr == "snap":
-                    cmd = f"sudo snap install {app_name}"
-                    needs_tty = needs_sudo_password
-                elif mgr == "cargo":
-                    cmd = f"cargo install {app_name}"
-                    needs_tty = False
-                else:
-                    continue
-
-                click.echo(f"    {app_name} via {mgr}...")
-                result = ssh_exec(
-                    user, host, port, cmd, key_path,
-                    check=False, interactive=needs_tty
-                )
-                if result.returncode == 0:
-                    click.secho(f"    {app_name}: installed", fg="green")
-                    installed = True
-                    break
-                else:
-                    # Get error message (only available in non-interactive mode)
-                    has_stderr = hasattr(result, "stderr") and result.stderr
-                    err = result.stderr if has_stderr else ""
-                    msg = f"    {app_name}: failed via {mgr}"
-                    if err and "not found" in err.lower():
-                        msg += " (package not found)"
-                    click.secho(msg, fg="yellow")
-
-            if not installed:
-                click.secho(f"    {app_name}: could not install", fg="red")
+            result = ssh_exec(
+                user, host, port, cmd, key_path,
+                check=False, interactive=needs_tty
+            )
+            if result.returncode == 0:
+                for pkg in packages:
+                    click.secho(f"      {pkg}: installed", fg="green")
+            else:
+                click.secho("      Batch install failed, trying individually...", fg="yellow")
+                # Fall back to individual installs
+                for pkg in packages:
+                    if manager == "apt":
+                        single_cmd = f"sudo apt install -y {pkg}"
+                    elif manager == "snap":
+                        single_cmd = f"sudo snap install {pkg}"
+                    elif manager == "npm":
+                        single_cmd = f"npm install -g {pkg}"
+                    else:
+                        continue
+                    single_result = ssh_exec(
+                        user, host, port, single_cmd, key_path,
+                        check=False, interactive=needs_tty
+                    )
+                    if single_result.returncode == 0:
+                        click.secho(f"      {pkg}: installed", fg="green")
+                    else:
+                        click.secho(f"      {pkg}: failed", fg="red")
 
     # Apply config files
     configs = resolved.get("configs", [])
