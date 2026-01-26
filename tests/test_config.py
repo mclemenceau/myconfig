@@ -15,10 +15,10 @@ def test_default_config_structure():
 
     assert "version" in config
     assert config["version"] == 1
-    assert "package_managers" in config
-    assert "preference" in config["package_managers"]
     assert "profiles" in config
     assert "base" in config["profiles"]
+    assert "apps" in config["profiles"]["base"]
+    assert "configs" in config["profiles"]["base"]
 
 
 def test_path_to_relative():
