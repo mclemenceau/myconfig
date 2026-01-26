@@ -32,20 +32,18 @@ A portable configuration management tool for quickly restoring your environment 
 **Schema**:
 ```yaml
 version: 1
-package_managers:
-  preference: [apt, snap, cargo]  # Global order
 profiles:
   base:
     apps:
-      helix: { prefer: cargo }
-      git: {}
+      apt: [git, curl]
+      cargo: [helix]
     configs:
       - .bashrc
       - .gitconfig
   work:
     extends: base
     apps:
-      docker: {}
+      apt: [docker, kubectl]
 ```
 
 ### Storage: Simple File Copies
@@ -101,24 +99,30 @@ profiles:
 
 **Resolution**: Child profile merges with parent, child wins on conflicts
 
-### Package Manager: Preference Order + Per-App Override
+### Package Manager: Grouped by Manager with Batch Install
 
-**Decision**: Global preference list with per-app override capability
+**Decision**: Apps are grouped by package manager, enabling batch installation
 
 **Rationale**:
-- Sensible defaults (apt → snap → cargo)
-- Flexibility when needed (e.g., prefer cargo for helix)
-- Handles different availability across systems
+- Efficient batch installation (`apt install pkg1 pkg2 pkg3`)
+- Clear and explicit - no ambiguity about which manager installs what
+- Simpler config structure (lists instead of nested objects)
+- Default to apt when no manager specified (most common case)
 
 **Example**:
 ```yaml
-package_managers:
-  preference: [apt, snap, cargo]  # Try apt first
 profiles:
   base:
     apps:
-      helix: { prefer: cargo }    # Override: use cargo for helix
-      git: {}                      # Use global preference
+      apt: [git, curl, htop]      # Installed via: apt install git curl htop
+      cargo: [helix, ripgrep]     # Installed via: cargo install helix ripgrep
+      snap: [spotify-client]
+```
+
+**CLI**:
+```bash
+myconfig add app git              # defaults to apt
+myconfig add app helix -m cargo   # explicit manager
 ```
 
 ### Conflict Handling: Backup Then Overwrite
