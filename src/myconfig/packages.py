@@ -170,11 +170,54 @@ class CargoManager(PackageManager):
             return False
 
 
+class NpmManager(PackageManager):
+    """NPM package manager (Node.js)."""
+
+    name = "npm"
+
+    @classmethod
+    def is_available(cls) -> bool:
+        return shutil.which("npm") is not None
+
+    @classmethod
+    def install(cls, package: str, dry_run: bool = False) -> bool:
+        cmd = ["npm", "install", "-g", package]
+        if dry_run:
+            click.echo(f"    Would run: {' '.join(cmd)}")
+            return True
+        try:
+            subprocess.run(cmd, check=True)
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
+    @classmethod
+    def is_installed(cls, package: str) -> bool:
+        result = subprocess.run(
+            ["npm", "list", "-g", package, "--depth=0"],
+            capture_output=True,
+        )
+        return result.returncode == 0
+
+    @classmethod
+    def uninstall(cls, package: str, dry_run: bool = False) -> bool:
+        cmd = ["npm", "uninstall", "-g", package]
+        if dry_run:
+            click.echo(f"    Would run: {' '.join(cmd)}")
+            return True
+        try:
+            subprocess.run(cmd, check=True)
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
+
 # Registry of available package managers
 MANAGERS: dict[str, type[PackageManager]] = {
     "apt": AptManager,
     "snap": SnapManager,
     "cargo": CargoManager,
+    "npm": NpmManager,
 }
 
 
