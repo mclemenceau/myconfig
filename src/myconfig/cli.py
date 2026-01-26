@@ -466,6 +466,9 @@ def deploy(target: str, profile: str, key: str | None):
     """Deploy configuration to a remote host via SSH.
 
     TARGET is user@host (e.g., ubuntu@192.168.1.50)
+
+    Package installation requires sudo access on the remote host.
+    If sudo requires a password, you will be prompted interactively.
     """
     from .deploy import remote_deploy
 
