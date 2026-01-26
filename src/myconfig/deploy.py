@@ -62,7 +62,8 @@ def ssh_exec(
     ssh_cmd = ["ssh", "-p", str(port)]
 
     if interactive:
-        ssh_cmd.append("-tt")  # Force pseudo-TTY allocation for interactive commands
+        # Force pseudo-TTY allocation for interactive commands
+        ssh_cmd.append("-tt")
 
     if key_path:
         ssh_cmd.extend(["-i", key_path])
@@ -140,7 +141,7 @@ def remote_deploy(
             )
         click.secho("  Connected!", fg="green")
     except subprocess.CalledProcessError as e:
-        raise click.ClickException(f"SSH connection failed: {e.stderr}")
+        raise click.ClickException(f"SSH connection failed: {e.stderr}") from e
 
     # Load and resolve profile
     config = load_config()
@@ -164,7 +165,7 @@ def remote_deploy(
         try:
             scp_upload(archive_path, user, host, port, remote_archive, key_path)
         except subprocess.CalledProcessError as e:
-            raise click.ClickException(f"Upload failed: {e.stderr}")
+            raise click.ClickException(f"Upload failed: {e.stderr}") from e
 
         # Extract on remote
         click.echo("  Extracting on remote...")
@@ -200,10 +201,14 @@ def remote_deploy(
 
         if needs_sudo_password:
             click.secho(
-                "  Note: sudo requires password - you will be prompted interactively",
+                "  Note: sudo requires password - "
+                "you will be prompted interactively",
                 fg="yellow",
             )
-            click.echo("  (Tip: configure passwordless sudo for non-interactive deploys)")
+            click.echo(
+                "  (Tip: configure passwordless sudo "
+                "for non-interactive deploys)"
+            )
 
         for app_name, app_config in apps.items():
             prefer = app_config.get("prefer")
@@ -237,7 +242,8 @@ def remote_deploy(
                     break
                 else:
                     # Get error message (only available in non-interactive mode)
-                    err = result.stderr if hasattr(result, 'stderr') and result.stderr else ""
+                    has_stderr = hasattr(result, "stderr") and result.stderr
+                    err = result.stderr if has_stderr else ""
                     msg = f"    {app_name}: failed via {mgr}"
                     if err and "not found" in err.lower():
                         msg += " (package not found)"
