@@ -1,16 +1,11 @@
 """Remote deployment via SSH for my-config."""
 
 import os
+import subprocess
 import tempfile
 from pathlib import Path
 
 import click
-
-try:
-    import paramiko
-    HAS_PARAMIKO = True
-except ImportError:
-    HAS_PARAMIKO = False
 
 from .config import load_config
 from .export import create_archive
@@ -46,63 +41,76 @@ def parse_target(target: str) -> tuple[str, str, int]:
     return user, host, port
 
 
-def get_default_ssh_key() -> Path | None:
-    """Get the default SSH key path."""
-    ssh_dir = Path.home() / ".ssh"
+def ssh_exec(
+    user: str,
+    host: str,
+    port: int,
+    command: str,
+    key_path: str | None = None,
+    check: bool = True,
+    interactive: bool = False,
+) -> subprocess.CompletedProcess:
+    """Execute a command on a remote host via SSH.
 
-    # Try common key names in order of preference
-    key_names = ["id_ed25519", "id_ecdsa", "id_rsa"]
-    for name in key_names:
-        key_path = ssh_dir / name
-        if key_path.exists():
-            return key_path
+    Uses the system's ssh command, which respects SSH config,
+    ControlMaster multiplexing, and hardware security keys.
 
-    return None
+    Args:
+        interactive: If True, allocate a TTY and pass through stdin/stdout
+                     for commands that need user interaction (e.g., sudo).
+    """
+    ssh_cmd = ["ssh", "-p", str(port)]
 
+    if interactive:
+        ssh_cmd.append("-tt")  # Force pseudo-TTY allocation for interactive commands
 
-def ensure_ssh_key_on_remote(
-    client: "paramiko.SSHClient",
-    local_key_path: Path,
-) -> None:
-    """Ensure the local public key is in remote authorized_keys."""
-    pub_key_path = local_key_path.with_suffix(".pub")
+    if key_path:
+        ssh_cmd.extend(["-i", key_path])
 
-    if not pub_key_path.exists():
-        click.secho(
-            f"Warning: No public key found at {pub_key_path}",
-            fg="yellow",
+    ssh_cmd.append(f"{user}@{host}")
+    ssh_cmd.append(command)
+
+    if interactive:
+        # For interactive commands, don't capture output - let user interact
+        return subprocess.run(
+            ssh_cmd,
+            check=check,
         )
-        return
+    else:
+        return subprocess.run(
+            ssh_cmd,
+            capture_output=True,
+            text=True,
+            check=check,
+        )
 
-    pub_key = pub_key_path.read_text().strip()
 
-    # Check if key already exists
-    stdin, stdout, stderr = client.exec_command(
-        "cat ~/.ssh/authorized_keys 2>/dev/null || echo ''"
+def scp_upload(
+    local_path: Path,
+    user: str,
+    host: str,
+    port: int,
+    remote_path: str,
+    key_path: str | None = None,
+) -> subprocess.CompletedProcess:
+    """Upload a file to a remote host via SCP.
+
+    Uses the system's scp command for compatibility with SSH config.
+    """
+    scp_cmd = ["scp", "-P", str(port)]
+
+    if key_path:
+        scp_cmd.extend(["-i", key_path])
+
+    scp_cmd.append(str(local_path))
+    scp_cmd.append(f"{user}@{host}:{remote_path}")
+
+    return subprocess.run(
+        scp_cmd,
+        capture_output=True,
+        text=True,
+        check=True,
     )
-    authorized_keys = stdout.read().decode()
-
-    if pub_key in authorized_keys:
-        click.echo("  SSH key already authorized on remote")
-        return
-
-    # Add key
-    click.echo("  Adding SSH key to remote authorized_keys...")
-    commands = [
-        "mkdir -p ~/.ssh",
-        "chmod 700 ~/.ssh",
-        f"echo '{pub_key}' >> ~/.ssh/authorized_keys",
-        "chmod 600 ~/.ssh/authorized_keys",
-    ]
-
-    for cmd in commands:
-        stdin, stdout, stderr = client.exec_command(cmd)
-        exit_status = stdout.channel.recv_exit_status()
-        if exit_status != 0:
-            error = stderr.read().decode()
-            raise click.ClickException(f"Failed to setup SSH key: {error}")
-
-    click.secho("  SSH key added to remote", fg="green")
 
 
 def remote_deploy(
@@ -112,160 +120,154 @@ def remote_deploy(
 ) -> None:
     """Deploy configuration to a remote host.
 
+    Uses the system's ssh/scp commands for full compatibility with SSH config,
+    ControlMaster multiplexing, and hardware security keys (like YubiKey).
+
     Args:
         target: user@host or user@host:port
         profile: Profile name to deploy
         key_path: Optional path to SSH private key
     """
-    if not HAS_PARAMIKO:
-        raise click.ClickException(
-            "paramiko is required for remote deployment. "
-            "Install it with: pip install paramiko"
-        )
-
     user, host, port = parse_target(target)
     click.echo(f"Connecting to {user}@{host}:{port}...")
 
-    # Determine SSH key
-    if key_path:
-        ssh_key = Path(key_path)
-    else:
-        ssh_key = get_default_ssh_key()
-
-    if not ssh_key:
-        raise click.ClickException(
-            "No SSH key found. Use --key or create ~/.ssh/id_ed25519"
-        )
+    # Test SSH connection
+    try:
+        result = ssh_exec(user, host, port, "echo connected", key_path)
+        if result.returncode != 0:
+            raise click.ClickException(
+                f"SSH connection failed: {result.stderr}"
+            )
+        click.secho("  Connected!", fg="green")
+    except subprocess.CalledProcessError as e:
+        raise click.ClickException(f"SSH connection failed: {e.stderr}")
 
     # Load and resolve profile
     config = load_config()
     resolved = resolve_profile(config, profile)
 
-    # Connect via SSH
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    # Create temporary encrypted archive
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
 
-    try:
-        client.connect(
-            hostname=host,
-            port=port,
-            username=user,
-            key_filename=str(ssh_key),
-            look_for_keys=True,
-            allow_agent=True,
+        # Generate a random password for transfer
+        import secrets
+        transfer_password = secrets.token_urlsafe(32)
+
+        # Create archive
+        click.echo("  Creating archive...")
+        archive_path = create_archive(tmp_path, transfer_password)
+
+        # Upload archive
+        click.echo("  Uploading archive...")
+        remote_archive = f"/tmp/myconfig_deploy_{os.getpid()}.tar.gz.enc"
+        try:
+            scp_upload(archive_path, user, host, port, remote_archive, key_path)
+        except subprocess.CalledProcessError as e:
+            raise click.ClickException(f"Upload failed: {e.stderr}")
+
+        # Extract on remote
+        click.echo("  Extracting on remote...")
+        remote_tar = remote_archive.replace(".enc", "")
+        commands = [
+            # Decrypt
+            f"openssl enc -aes-256-cbc -d -pbkdf2 -in {remote_archive} "
+            f"-out {remote_tar} -pass pass:{transfer_password}",
+            # Create config dir
+            "mkdir -p ~/.config/myconfig/files",
+            # Extract
+            f"tar -xzf {remote_tar} -C ~/.config/myconfig/",
+            # Cleanup
+            f"rm -f {remote_archive} {remote_tar}",
+        ]
+
+        for cmd in commands:
+            result = ssh_exec(user, host, port, cmd, key_path, check=False)
+            if result.returncode != 0:
+                click.secho(f"  Warning: {result.stderr}", fg="yellow")
+
+    # Install packages
+    apps = resolved.get("apps", {})
+    if apps:
+        click.echo(f"  Installing {len(apps)} app(s)...")
+        preference = config["package_managers"]["preference"]
+
+        # Check if passwordless sudo is available
+        sudo_check = ssh_exec(
+            user, host, port, "sudo -n true 2>/dev/null", key_path, check=False
         )
-        click.secho("  Connected!", fg="green")
+        needs_sudo_password = sudo_check.returncode != 0
 
-        # Ensure SSH key is authorized
-        ensure_ssh_key_on_remote(client, ssh_key)
+        if needs_sudo_password:
+            click.secho(
+                "  Note: sudo requires password - you will be prompted interactively",
+                fg="yellow",
+            )
+            click.echo("  (Tip: configure passwordless sudo for non-interactive deploys)")
 
-        # Create temporary encrypted archive
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir)
+        for app_name, app_config in apps.items():
+            prefer = app_config.get("prefer")
+            if prefer:
+                managers = [prefer]
+            else:
+                managers = preference
 
-            # Generate a random password for transfer
-            import secrets
-            transfer_password = secrets.token_urlsafe(32)
+            installed = False
+            for mgr in managers:
+                if mgr == "apt":
+                    cmd = f"sudo apt install -y {app_name}"
+                    needs_tty = needs_sudo_password
+                elif mgr == "snap":
+                    cmd = f"sudo snap install {app_name}"
+                    needs_tty = needs_sudo_password
+                elif mgr == "cargo":
+                    cmd = f"cargo install {app_name}"
+                    needs_tty = False
+                else:
+                    continue
 
-            # Create archive
-            click.echo("  Creating archive...")
-            archive_path = create_archive(tmp_path, transfer_password)
+                click.echo(f"    {app_name} via {mgr}...")
+                result = ssh_exec(
+                    user, host, port, cmd, key_path,
+                    check=False, interactive=needs_tty
+                )
+                if result.returncode == 0:
+                    click.secho(f"    {app_name}: installed", fg="green")
+                    installed = True
+                    break
+                else:
+                    # Get error message (only available in non-interactive mode)
+                    err = result.stderr if hasattr(result, 'stderr') and result.stderr else ""
+                    msg = f"    {app_name}: failed via {mgr}"
+                    if err and "not found" in err.lower():
+                        msg += " (package not found)"
+                    click.secho(msg, fg="yellow")
 
-            # Upload archive
-            click.echo("  Uploading archive...")
-            sftp = client.open_sftp()
-            remote_archive = f"/tmp/myconfig_deploy_{os.getpid()}.tar.gz.enc"
-            sftp.put(str(archive_path), remote_archive)
-            sftp.close()
+            if not installed:
+                click.secho(f"    {app_name}: could not install", fg="red")
 
-            # Extract on remote
-            click.echo("  Extracting on remote...")
-            remote_tar = remote_archive.replace(".enc", "")
+    # Apply config files
+    configs = resolved.get("configs", [])
+    if configs:
+        click.echo(f"  Applying {len(configs)} config file(s)...")
+
+        for cfg in configs:
+            # Source is in ~/.config/myconfig/files/
+            source = f"~/.config/myconfig/files/{cfg}"
+            # Target is in home directory
+            cfg_target = f"~/{cfg}"
+
             commands = [
-                # Decrypt
-                f"openssl enc -aes-256-cbc -d -pbkdf2 -in {remote_archive} "
-                f"-out {remote_tar} -pass pass:{transfer_password}",
-                # Create config dir
-                "mkdir -p ~/.config/myconfig/files",
-                # Extract
-                f"tar -xzf {remote_tar} -C ~/.config/myconfig/",
-                # Cleanup
-                f"rm -f {remote_archive} {remote_tar}",
+                # Create parent directory
+                f"mkdir -p $(dirname {cfg_target})",
+                # Backup existing
+                f"[ -f {cfg_target} ] && cp {cfg_target} "
+                f"{cfg_target}.bak.$(date +%Y%m%d_%H%M%S) || true",
+                # Copy new file
+                f"cp {source} {cfg_target}",
             ]
 
             for cmd in commands:
-                stdin, stdout, stderr = client.exec_command(cmd)
-                exit_status = stdout.channel.recv_exit_status()
-                if exit_status != 0:
-                    error = stderr.read().decode()
-                    click.secho(f"  Warning: {error}", fg="yellow")
+                ssh_exec(user, host, port, cmd, key_path, check=False)
 
-        # Install packages
-        apps = resolved.get("apps", {})
-        if apps:
-            click.echo(f"  Installing {len(apps)} app(s)...")
-            preference = config["package_managers"]["preference"]
-
-            for app_name, app_config in apps.items():
-                prefer = app_config.get("prefer")
-                if prefer:
-                    managers = [prefer]
-                else:
-                    managers = preference
-
-                installed = False
-                for mgr in managers:
-                    if mgr == "apt":
-                        cmd = f"sudo apt install -y {app_name}"
-                    elif mgr == "snap":
-                        cmd = f"sudo snap install {app_name}"
-                    elif mgr == "cargo":
-                        cmd = f"cargo install {app_name}"
-                    else:
-                        continue
-
-                    click.echo(f"    {app_name} via {mgr}...")
-                    stdin, stdout, stderr = client.exec_command(cmd)
-                    exit_status = stdout.channel.recv_exit_status()
-                    if exit_status == 0:
-                        click.secho(f"    {app_name}: installed", fg="green")
-                        installed = True
-                        break
-                    else:
-                        msg = f"    {app_name}: failed via {mgr}"
-                        click.secho(msg, fg="yellow")
-
-                if not installed:
-                    click.secho(f"    {app_name}: could not install", fg="red")
-
-        # Apply config files
-        configs = resolved.get("configs", [])
-        if configs:
-            click.echo(f"  Applying {len(configs)} config file(s)...")
-
-            for cfg in configs:
-                # Source is in ~/.config/myconfig/files/
-                source = f"~/.config/myconfig/files/{cfg}"
-                # Target is in home directory
-                target = f"~/{cfg}"
-
-                commands = [
-                    # Create parent directory
-                    f"mkdir -p $(dirname {target})",
-                    # Backup existing
-                    f"[ -f {target} ] && cp {target} "
-                    f"{target}.bak.$(date +%Y%m%d_%H%M%S) || true",
-                    # Copy new file
-                    f"cp {source} {target}",
-                ]
-
-                for cmd in commands:
-                    stdin, stdout, stderr = client.exec_command(cmd)
-                    stdout.channel.recv_exit_status()
-
-                click.secho(f"    Applied: {cfg}", fg="green")
-
-        click.secho("\nDeployment complete!", fg="green", bold=True)
-
-    finally:
-        client.close()
+            click.secho(f"    Applied: {cfg}", fg="green")
