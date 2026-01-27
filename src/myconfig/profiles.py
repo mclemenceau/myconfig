@@ -3,6 +3,15 @@
 from typing import Any
 
 
+def get_app_name(item):
+    """Extract app name from a list item (string or dict)."""
+    if isinstance(item, str):
+        return item
+    elif isinstance(item, dict):
+        return list(item.keys())[0]
+    return None
+
+
 def resolve_profile(
     config: dict[str, Any], profile_name: str
 ) -> dict[str, Any]:
@@ -47,9 +56,13 @@ def resolve_profile(
             if isinstance(pkg_list, list):
                 if manager not in merged["apps"]:
                     merged["apps"][manager] = []
+                # Get existing app names for dedup
+                existing_names = [get_app_name(item) for item in merged["apps"][manager]]
                 for pkg in pkg_list:
-                    if pkg not in merged["apps"][manager]:
+                    pkg_name = get_app_name(pkg)
+                    if pkg_name not in existing_names:
                         merged["apps"][manager].append(pkg)
+                        existing_names.append(pkg_name)
 
         # Merge configs (deduplicate, preserve order)
         for cfg in prof.get("configs", []):

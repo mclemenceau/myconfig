@@ -20,7 +20,7 @@ class PackageManager(ABC):
 
     @classmethod
     @abstractmethod
-    def install(cls, package: str, dry_run: bool = False) -> bool:
+    def install(cls, package: str, params: str | None = None, dry_run: bool = False) -> bool:
         """Install a package. Returns True on success."""
         pass
 
@@ -58,8 +58,11 @@ class AptManager(PackageManager):
         return shutil.which("apt") is not None
 
     @classmethod
-    def install(cls, package: str, dry_run: bool = False) -> bool:
-        cmd = ["sudo", "apt", "install", "-y", package]
+    def install(cls, package: str, params: str | None = None, dry_run: bool = False) -> bool:
+        cmd = ["sudo", "apt", "install", "-y"]
+        if params:
+            cmd.extend(params.split())
+        cmd.append(package)
         if dry_run:
             click.echo(f"    Would run: {' '.join(cmd)}")
             return True
@@ -130,8 +133,11 @@ class SnapManager(PackageManager):
         return shutil.which("snap") is not None
 
     @classmethod
-    def install(cls, package: str, dry_run: bool = False) -> bool:
-        cmd = ["sudo", "snap", "install", package]
+    def install(cls, package: str, params: str | None = None, dry_run: bool = False) -> bool:
+        cmd = ["sudo", "snap", "install"]
+        if params:
+            cmd.extend(params.split())
+        cmd.append(package)
         if dry_run:
             click.echo(f"    Would run: {' '.join(cmd)}")
             return True
@@ -203,8 +209,11 @@ class CargoManager(PackageManager):
         return shutil.which("cargo") is not None
 
     @classmethod
-    def install(cls, package: str, dry_run: bool = False) -> bool:
-        cmd = ["cargo", "install", package]
+    def install(cls, package: str, params: str | None = None, dry_run: bool = False) -> bool:
+        cmd = ["cargo", "install"]
+        if params:
+            cmd.extend(params.split())
+        cmd.append(package)
         if dry_run:
             click.echo(f"    Would run: {' '.join(cmd)}")
             return True
@@ -267,8 +276,11 @@ class NpmManager(PackageManager):
         return shutil.which("npm") is not None
 
     @classmethod
-    def install(cls, package: str, dry_run: bool = False) -> bool:
-        cmd = ["npm", "install", "-g", package]
+    def install(cls, package: str, params: str | None = None, dry_run: bool = False) -> bool:
+        cmd = ["npm", "install", "-g"]
+        if params:
+            cmd.extend(params.split())
+        cmd.append(package)
         if dry_run:
             click.echo(f"    Would run: {' '.join(cmd)}")
             return True
@@ -344,14 +356,30 @@ def get_available_managers() -> list[str]:
     return [name for name, mgr in MANAGERS.items() if mgr.is_available()]
 
 
+def get_app_name(item):
+    """Extract app name from a list item (string or dict)."""
+    if isinstance(item, str):
+        return item
+    elif isinstance(item, dict):
+        return list(item.keys())[0]
+    return None
+
+
+def get_app_params(item):
+    """Extract app params from a list item (string or dict)."""
+    if isinstance(item, dict):
+        return list(item.values())[0]
+    return None
+
+
 def install_apps(
-    apps: dict[str, list[str]],
+    apps: dict[str, list],
     dry_run: bool = False,
 ) -> None:
     """Install applications grouped by package manager.
 
     Args:
-        apps: Dict of manager_name -> list of package names
+        apps: Dict of manager_name -> list of package items (str or {name: params})
         dry_run: If True, only show what would be done
     """
     available = get_available_managers()
@@ -363,16 +391,39 @@ def install_apps(
         if manager_name not in available:
             click.secho(f"  Package manager not available: {manager_name}", fg="red")
             for pkg in packages:
-                click.secho(f"    Skipping: {pkg}", fg="yellow")
+                click.secho(f"    Skipping: {get_app_name(pkg)}", fg="yellow")
             continue
 
         mgr = MANAGERS[manager_name]
-        click.echo(f"  Installing via {manager_name}: {', '.join(packages)}")
 
-        successful, failed = mgr.install_batch(packages, dry_run=dry_run)
+        # Separate packages with params from simple ones
+        simple_pkgs = []
+        parameterized_pkgs = []
+        for item in packages:
+            name = get_app_name(item)
+            params = get_app_params(item)
+            if params:
+                parameterized_pkgs.append((name, params))
+            else:
+                simple_pkgs.append(name)
 
-        if not dry_run:
-            for pkg in successful:
-                click.secho(f"    {pkg}: installed", fg="green")
-            for pkg in failed:
-                click.secho(f"    {pkg}: failed", fg="red")
+        # Batch install simple packages
+        if simple_pkgs:
+            click.echo(f"  Installing via {manager_name}: {', '.join(simple_pkgs)}")
+            successful, failed = mgr.install_batch(simple_pkgs, dry_run=dry_run)
+            if not dry_run:
+                for pkg in successful:
+                    click.secho(f"    {pkg}: installed", fg="green")
+                for pkg in failed:
+                    click.secho(f"    {pkg}: failed", fg="red")
+
+        # Install parameterized packages individually
+        for name, params in parameterized_pkgs:
+            click.echo(f"  Installing via {manager_name}: {name} {params}")
+            if mgr.is_installed(name):
+                click.secho(f"    {name}: already installed", fg="green")
+            elif mgr.install(name, params=params, dry_run=dry_run):
+                if not dry_run:
+                    click.secho(f"    {name}: installed", fg="green")
+            else:
+                click.secho(f"    {name}: failed", fg="red")
