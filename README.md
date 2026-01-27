@@ -48,6 +48,10 @@ myconfig add app curl
 myconfig add app helix --manager cargo    # or -m cargo
 myconfig add app spotify-client -m snap
 
+# Add an app with extra package manager parameters
+myconfig add app node -m snap -p "--classic"
+myconfig add app code -m snap -p "--classic --channel=stable"
+
 # Add a config file
 myconfig add config ~/.bashrc
 myconfig add config ~/.ssh/config
@@ -262,8 +266,13 @@ profiles:
     apps:
       apt: [git, curl, htop]
       cargo: [helix, ripgrep]
-      snap: [spotify-client]
+      snap:
+        - spotify-client
+        - node: "--classic"           # with extra parameters
+        - code: "--classic --channel=stable"
 ```
+
+Apps with parameters are stored as `{name: "params"}` and installed individually to preserve their specific arguments.
 
 ## Secret Detection
 
@@ -317,8 +326,9 @@ The warning is informational - you can still track these files, but be careful w
 
 | Option | Description |
 |--------|-------------|
-| `--profile, -p` | Specify profile (default: base) |
+| `--profile, -P` | Specify profile (default: base) |
 | `--manager, -m` | Package manager (apt/snap/cargo/npm, default: apt) |
+| `--params, -p` | Extra parameters for package manager (e.g., `--classic`) |
 | `--dry-run` | Preview changes without applying |
 | `--keep-file` | Keep stored copy when removing config |
 | `--key, -i` | SSH key for remote deployment |
