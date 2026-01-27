@@ -110,16 +110,37 @@ def add_config(path: str, profile: str):
     click.echo(f"Added config: {relative} (profile: {profile})")
 
 
+def get_app_name(item):
+    """Extract app name from a list item (string or dict)."""
+    if isinstance(item, str):
+        return item
+    elif isinstance(item, dict):
+        return list(item.keys())[0]
+    return None
+
+
+def get_app_params(item):
+    """Extract app params from a list item (string or dict)."""
+    if isinstance(item, dict):
+        return list(item.values())[0]
+    return None
+
+
 @add.command("app")
 @click.argument("name")
-@click.option("--profile", "-p", default="base", help="Profile to add to")
+@click.option("--profile", "-P", default="base", help="Profile to add to")
 @click.option(
     "--manager", "-m",
     type=click.Choice(["apt", "snap", "cargo", "npm"]),
     default="apt",
     help="Package manager to use (default: apt)",
 )
-def add_app(name: str, profile: str, manager: str):
+@click.option(
+    "--params", "-p",
+    default=None,
+    help="Extra parameters for the package manager (e.g., '--classic' for snap)",
+)
+def add_app(name: str, profile: str, manager: str, params: str | None):
     """Add an application to track.
 
     NAME is the package name (e.g., helix, ripgrep, git)
@@ -134,9 +155,11 @@ def add_app(name: str, profile: str, manager: str):
 
     # Check if already tracked under any manager
     for mgr, pkg_list in apps.items():
-        if isinstance(pkg_list, list) and name in pkg_list:
-            click.echo(f"Already tracking app: {name} (via {mgr})")
-            return
+        if isinstance(pkg_list, list):
+            for item in pkg_list:
+                if get_app_name(item) == name:
+                    click.echo(f"Already tracking app: {name} (via {mgr})")
+                    return
 
     # Add to the specified manager's list
     if "apps" not in config["profiles"][profile]:
@@ -145,10 +168,17 @@ def add_app(name: str, profile: str, manager: str):
     if manager not in config["profiles"][profile]["apps"]:
         config["profiles"][profile]["apps"][manager] = []
 
-    config["profiles"][profile]["apps"][manager].append(name)
+    # Store as dict if params provided, otherwise as string
+    if params:
+        config["profiles"][profile]["apps"][manager].append({name: params})
+    else:
+        config["profiles"][profile]["apps"][manager].append(name)
     save_config(config)
 
-    click.echo(f"Added app: {name} (profile: {profile}, manager: {manager})")
+    msg = f"Added app: {name} (profile: {profile}, manager: {manager})"
+    if params:
+        msg += f" [params: {params}]"
+    click.echo(msg)
 
 
 # --- Remove command group ---
@@ -210,7 +240,7 @@ def remove_config(path: str, profile: str, keep_file: bool):
 @remove.command("app")
 @click.argument("name")
 @click.option(
-    "--profile", "-p", default="base", help="Profile to remove from"
+    "--profile", "-P", default="base", help="Profile to remove from"
 )
 def remove_app(name: str, profile: str):
     """Remove an application from tracking.
@@ -227,9 +257,15 @@ def remove_app(name: str, profile: str):
 
     # Find which manager has this app
     found_manager = None
+    found_item = None
     for mgr, pkg_list in apps.items():
-        if isinstance(pkg_list, list) and name in pkg_list:
-            found_manager = mgr
+        if isinstance(pkg_list, list):
+            for item in pkg_list:
+                if get_app_name(item) == name:
+                    found_manager = mgr
+                    found_item = item
+                    break
+        if found_manager:
             break
 
     if not found_manager:
@@ -237,7 +273,7 @@ def remove_app(name: str, profile: str):
         raise click.ClickException(msg)
 
     # Remove from config
-    apps[found_manager].remove(name)
+    apps[found_manager].remove(found_item)
 
     # Clean up empty lists
     if not apps[found_manager]:
@@ -277,7 +313,16 @@ def list_items(profile: str | None):
             click.echo("  Apps:")
             for mgr, pkg_list in apps.items():
                 if isinstance(pkg_list, list) and pkg_list:
-                    click.echo(f"    {mgr}: {', '.join(pkg_list)}")
+                    # Format each app, showing params if present
+                    formatted = []
+                    for item in pkg_list:
+                        app_name = get_app_name(item)
+                        app_params = get_app_params(item)
+                        if app_params:
+                            formatted.append(f"{app_name} [{app_params}]")
+                        else:
+                            formatted.append(app_name)
+                    click.echo(f"    {mgr}: {', '.join(formatted)}")
         else:
             click.echo("  Apps: (none)")
 
