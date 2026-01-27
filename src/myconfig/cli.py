@@ -114,11 +114,12 @@ def add_config(path: str, profile: str):
 @click.argument("name")
 @click.option("--profile", "-p", default="base", help="Profile to add to")
 @click.option(
-    "--prefer",
-    type=click.Choice(["apt", "snap", "cargo"]),
-    help="Preferred package manager for this app",
+    "--manager", "-m",
+    type=click.Choice(["apt", "snap", "cargo", "npm"]),
+    default="apt",
+    help="Package manager to use (default: apt)",
 )
-def add_app(name: str, profile: str, prefer: str | None):
+def add_app(name: str, profile: str, manager: str):
     """Add an application to track.
 
     NAME is the package name (e.g., helix, ripgrep, git)
@@ -129,26 +130,25 @@ def add_app(name: str, profile: str, prefer: str | None):
     if profile not in config["profiles"]:
         config["profiles"][profile] = {"apps": {}, "configs": []}
 
-    # Check if already tracked
-    if name in config["profiles"][profile].get("apps", {}):
-        click.echo(f"Already tracking app: {name}")
-        return
+    apps = config["profiles"][profile].get("apps", {})
 
-    # Update config
+    # Check if already tracked under any manager
+    for mgr, pkg_list in apps.items():
+        if isinstance(pkg_list, list) and name in pkg_list:
+            click.echo(f"Already tracking app: {name} (via {mgr})")
+            return
+
+    # Add to the specified manager's list
     if "apps" not in config["profiles"][profile]:
         config["profiles"][profile]["apps"] = {}
 
-    app_config = {}
-    if prefer:
-        app_config["prefer"] = prefer
+    if manager not in config["profiles"][profile]["apps"]:
+        config["profiles"][profile]["apps"][manager] = []
 
-    config["profiles"][profile]["apps"][name] = app_config
+    config["profiles"][profile]["apps"][manager].append(name)
     save_config(config)
 
-    msg = f"Added app: {name} (profile: {profile})"
-    if prefer:
-        msg += f" [prefer: {prefer}]"
-    click.echo(msg)
+    click.echo(f"Added app: {name} (profile: {profile}, manager: {manager})")
 
 
 # --- Remove command group ---
@@ -223,13 +223,26 @@ def remove_app(name: str, profile: str):
     if profile not in config["profiles"]:
         raise click.ClickException(f"Profile not found: {profile}")
 
-    # Check if tracked
-    if name not in config["profiles"][profile].get("apps", {}):
+    apps = config["profiles"][profile].get("apps", {})
+
+    # Find which manager has this app
+    found_manager = None
+    for mgr, pkg_list in apps.items():
+        if isinstance(pkg_list, list) and name in pkg_list:
+            found_manager = mgr
+            break
+
+    if not found_manager:
         msg = f"App not tracked in profile '{profile}': {name}"
         raise click.ClickException(msg)
 
     # Remove from config
-    del config["profiles"][profile]["apps"][name]
+    apps[found_manager].remove(name)
+
+    # Clean up empty lists
+    if not apps[found_manager]:
+        del apps[found_manager]
+
     save_config(config)
 
     click.echo(f"Removed app: {name} (profile: {profile})")
@@ -258,16 +271,13 @@ def list_items(profile: str | None):
         if extends:
             click.echo(f"  extends: {extends}")
 
-        # Apps
+        # Apps (grouped by manager)
         apps = prof.get("apps", {})
         if apps:
             click.echo("  Apps:")
-            for app_name, app_config in apps.items():
-                prefer = app_config.get("prefer", "")
-                if prefer:
-                    click.echo(f"    - {app_name} (prefer: {prefer})")
-                else:
-                    click.echo(f"    - {app_name}")
+            for mgr, pkg_list in apps.items():
+                if isinstance(pkg_list, list) and pkg_list:
+                    click.echo(f"    {mgr}: {', '.join(pkg_list)}")
         else:
             click.echo("  Apps: (none)")
 
@@ -411,9 +421,9 @@ def apply(profile: str, dry_run: bool):
     # Install apps
     apps = resolved.get("apps", {})
     if apps:
-        click.echo(f"\nInstalling {len(apps)} app(s)...")
-        pref = config["package_managers"]["preference"]
-        install_apps(apps, pref, dry_run=dry_run)
+        total = sum(len(pkgs) for pkgs in apps.values() if isinstance(pkgs, list))
+        click.echo(f"\nInstalling {total} app(s)...")
+        install_apps(apps, dry_run=dry_run)
 
     # Apply configs
     configs = resolved.get("configs", [])

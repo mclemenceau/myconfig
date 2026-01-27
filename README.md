@@ -22,9 +22,9 @@ pip install .
 # Initialize myconfig
 myconfig init
 
-# Track some apps
+# Track some apps (apt is the default package manager)
 myconfig add app git
-myconfig add app helix --prefer cargo
+myconfig add app helix -m cargo   # use cargo for helix
 myconfig add app ripgrep
 
 # Track config files
@@ -41,12 +41,12 @@ myconfig list
 ### Adding Apps and Configs
 
 ```bash
-# Add an app (uses global package manager preference)
+# Add an app (defaults to apt)
 myconfig add app curl
 
-# Add an app with specific package manager preference
-myconfig add app helix --prefer cargo
-myconfig add app spotify-client --prefer snap
+# Add an app with specific package manager
+myconfig add app helix --manager cargo    # or -m cargo
+myconfig add app spotify-client -m snap
 
 # Add a config file
 myconfig add config ~/.bashrc
@@ -94,9 +94,8 @@ Example output:
 ```
 [base]
   Apps:
-    - helix (prefer: cargo)
-    - ripgrep
-    - git
+    apt: git, ripgrep, curl
+    cargo: helix
   Configs:
     [+] .bashrc
     [+] .gitconfig
@@ -104,8 +103,7 @@ Example output:
 [work]
   extends: base
   Apps:
-    - docker
-    - kubectl
+    apt: docker, kubectl
   Configs:
     [+] .config/work-vpn.conf
 ```
@@ -201,16 +199,11 @@ Edit `~/.config/myconfig/config.yml` to set up inheritance:
 
 ```yaml
 version: 1
-package_managers:
-  preference: [apt, snap, cargo]
-
 profiles:
   base:
     apps:
-      git: {}
-      curl: {}
-      helix:
-        prefer: cargo
+      apt: [git, curl]
+      cargo: [helix]
     configs:
       - .bashrc
       - .gitconfig
@@ -218,50 +211,58 @@ profiles:
   work:
     extends: base          # Inherits all apps and configs from base
     apps:
-      docker: {}
-      kubectl: {}
+      apt: [docker, kubectl]
     configs:
       - .kube/config
 
   personal:
     extends: base
     apps:
-      spotify-client:
-        prefer: snap
+      snap: [spotify-client]
     configs:
       - .config/personal-projects.conf
 ```
 
 When you apply the `work` profile, you get:
-- All apps from `base` (git, curl, helix) + work apps (docker, kubectl)
+- All apps from `base` (apt: git, curl; cargo: helix) + work apps (apt: docker, kubectl)
 - All configs from `base` (.bashrc, .gitconfig) + work configs (.kube/config)
 
-## Package Manager Preference
+## Package Managers
 
-myconfig supports three package managers:
-- **apt** - Debian/Ubuntu packages
+myconfig supports four package managers:
+- **apt** - Debian/Ubuntu packages (default)
 - **snap** - Snap packages
 - **cargo** - Rust packages
+- **npm** - Node.js packages
 
-### Global Preference
+Apps are grouped by package manager, enabling batch installation for efficiency.
 
-Set the default order in `config.yml`:
+### Specifying Package Manager
 
-```yaml
-package_managers:
-  preference: [apt, snap, cargo]  # Try apt first, then snap, then cargo
-```
-
-### Per-App Override
-
-Some tools are better installed via specific managers:
+When adding an app, specify the manager with `--manager` (or `-m`). If not specified, `apt` is used:
 
 ```bash
-# Helix editor - better to install via cargo for latest version
-myconfig add app helix --prefer cargo
+# Uses apt (default)
+myconfig add app git
+myconfig add app curl
 
-# Spotify - only available as snap
-myconfig add app spotify-client --prefer snap
+# Specify different managers
+myconfig add app helix -m cargo      # Rust packages via cargo
+myconfig add app spotify-client -m snap
+myconfig add app typescript -m npm
+```
+
+### Config Structure
+
+Apps are stored grouped by manager for batch installation:
+
+```yaml
+profiles:
+  base:
+    apps:
+      apt: [git, curl, htop]
+      cargo: [helix, ripgrep]
+      snap: [spotify-client]
 ```
 
 ## Secret Detection
@@ -317,7 +318,7 @@ The warning is informational - you can still track these files, but be careful w
 | Option | Description |
 |--------|-------------|
 | `--profile, -p` | Specify profile (default: base) |
-| `--prefer` | Package manager preference (apt/snap/cargo) |
+| `--manager, -m` | Package manager (apt/snap/cargo/npm, default: apt) |
 | `--dry-run` | Preview changes without applying |
 | `--keep-file` | Keep stored copy when removing config |
 | `--key, -i` | SSH key for remote deployment |

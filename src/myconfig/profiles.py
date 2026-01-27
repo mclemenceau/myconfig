@@ -42,9 +42,14 @@ def resolve_profile(
     for prof_name in chain:
         prof = profiles[prof_name]
 
-        # Merge apps (child overrides parent)
-        for app_name, app_config in prof.get("apps", {}).items():
-            merged["apps"][app_name] = app_config.copy() if app_config else {}
+        # Merge apps (grouped by manager)
+        for manager, pkg_list in prof.get("apps", {}).items():
+            if isinstance(pkg_list, list):
+                if manager not in merged["apps"]:
+                    merged["apps"][manager] = []
+                for pkg in pkg_list:
+                    if pkg not in merged["apps"][manager]:
+                        merged["apps"][manager].append(pkg)
 
         # Merge configs (deduplicate, preserve order)
         for cfg in prof.get("configs", []):
@@ -72,11 +77,25 @@ def get_profile_info(
     prof = profiles[profile_name]
     resolved = resolve_profile(config, profile_name)
 
+    # Count direct apps (sum of all packages across managers)
+    direct_apps = prof.get("apps", {})
+    direct_app_count = sum(
+        len(pkgs) for pkgs in direct_apps.values() if isinstance(pkgs, list)
+    )
+
+    # Count resolved apps
+    resolved_apps = resolved["apps"]
+    resolved_app_count = sum(
+        len(pkgs) for pkgs in resolved_apps.values() if isinstance(pkgs, list)
+    )
+
     return {
         "name": profile_name,
         "extends": prof.get("extends"),
-        "direct_apps": list(prof.get("apps", {}).keys()),
+        "direct_apps": direct_apps,
+        "direct_app_count": direct_app_count,
         "direct_configs": prof.get("configs", []),
-        "resolved_apps": list(resolved["apps"].keys()),
+        "resolved_apps": resolved_apps,
+        "resolved_app_count": resolved_app_count,
         "resolved_configs": resolved["configs"],
     }

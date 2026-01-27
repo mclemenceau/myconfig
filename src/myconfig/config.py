@@ -30,9 +30,6 @@ def default_config() -> dict[str, Any]:
     """Return the default configuration structure."""
     return {
         "version": CONFIG_VERSION,
-        "package_managers": {
-            "preference": ["apt", "snap", "cargo"],
-        },
         "profiles": {
             "base": {
                 "apps": {},
