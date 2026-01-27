@@ -333,10 +333,20 @@ def remote_deploy(
             # Target is in home directory
             cfg_target = f"~/{cfg}"
 
+            # Check if files are identical (skip backup if unchanged)
+            diff_check = ssh_exec(
+                user, host, port,
+                f"diff -q {source} {cfg_target} 2>/dev/null",
+                key_path, check=False
+            )
+            if diff_check.returncode == 0:
+                click.echo(f"    Unchanged: {cfg}")
+                continue
+
             commands = [
                 # Create parent directory
                 f"mkdir -p $(dirname {cfg_target})",
-                # Backup existing
+                # Backup existing (only if file exists and is different)
                 f"[ -f {cfg_target} ] && cp {cfg_target} "
                 f"{cfg_target}.bak.$(date +%Y%m%d_%H%M%S) || true",
                 # Copy new file
