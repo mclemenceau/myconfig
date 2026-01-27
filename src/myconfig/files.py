@@ -49,7 +49,12 @@ def apply_configs(configs: list[str], dry_run: bool = False) -> None:
         # Create parent directories if needed
         target.parent.mkdir(parents=True, exist_ok=True)
 
-        # Backup existing file
+        # Check if files are identical
+        if target.exists() and stored.read_bytes() == target.read_bytes():
+            click.echo(f"  Unchanged: {relative}")
+            continue
+
+        # Backup existing file (only if different)
         if target.exists():
             backup = backup_file(target)
             if backup:
