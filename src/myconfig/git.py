@@ -70,12 +70,32 @@ def git_init_and_add_remote(url: str) -> None:
             f"git fetch failed: {result.stderr.strip()}"
         )
 
-    # Try to checkout the remote default branch
     branch = _detect_default_branch()
-    result = _run_git("checkout", "-t", f"origin/{branch}")
-    if result.returncode != 0:
-        # Remote might be empty, just create the branch locally
+
+    # Check if remote has the branch
+    result = _run_git(
+        "rev-parse", "--verify", f"origin/{branch}",
+    )
+    if result.returncode == 0:
+        # Remote has content — merge it into local
         _run_git("checkout", "-b", branch)
+        _run_git(
+            "branch", "--set-upstream-to", f"origin/{branch}",
+        )
+        result = _run_git(
+            "merge", f"origin/{branch}",
+            "--allow-unrelated-histories",
+        )
+        if result.returncode != 0:
+            raise click.ClickException(
+                f"git merge failed: {result.stderr.strip()}"
+            )
+    else:
+        # Remote is empty, just create the branch locally
+        _run_git("checkout", "-b", branch)
+        _run_git(
+            "remote", "set-head", "origin", branch,
+        )
 
 
 def _detect_default_branch() -> str:
@@ -84,7 +104,9 @@ def _detect_default_branch() -> str:
     if result.returncode == 0:
         for line in result.stdout.splitlines():
             if "HEAD branch:" in line:
-                return line.split(":")[-1].strip()
+                name = line.split(":")[-1].strip()
+                if name and name != "(unknown)":
+                    return name
     return "main"
 
 
@@ -125,9 +147,12 @@ def git_pull() -> None:
     """Pull latest from remote."""
     result = _run_git("pull")
     if result.returncode != 0:
-        raise click.ClickException(
-            f"git pull failed: {result.stderr.strip()}"
-        )
+        # May need explicit remote/branch if no upstream set
+        result = _run_git("pull", "origin", "HEAD")
+        if result.returncode != 0:
+            raise click.ClickException(
+                f"git pull failed: {result.stderr.strip()}"
+            )
     click.secho("Pulled latest changes.", fg="green")
 
 
