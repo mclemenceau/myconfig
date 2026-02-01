@@ -2,7 +2,7 @@
 
 A portable configuration management tool for quickly restoring your environment on any machine.
 
-Track your favorite apps and dotfiles, export them to a USB drive, and deploy to any Ubuntu machine in seconds.
+Track your favorite apps and dotfiles, export them to a USB drive, and restore on any Ubuntu machine in seconds.
 
 ## Installation
 
@@ -160,28 +160,6 @@ myconfig export ~/backup/myconfig_backup.tar.gz.enc
 myconfig import /media/usb/myconfig_20250125_143022.tar.gz.enc
 ```
 
-### Remote Deployment
-
-Deploy your configuration to a remote machine via SSH:
-
-```bash
-# Deploy to remote host
-myconfig deploy ubuntu@192.168.1.50
-
-# Deploy specific profile
-myconfig deploy ubuntu@192.168.1.50 --profile work
-
-# Use specific SSH key
-myconfig deploy ubuntu@192.168.1.50 --key ~/.ssh/id_work
-```
-
-This will:
-1. Connect via SSH
-2. Add your public key to remote `authorized_keys` (if needed)
-3. Transfer encrypted configuration archive
-4. Install all tracked apps (requires sudo on remote)
-5. Copy all config files to correct locations
-
 ## Working with Profiles
 
 Profiles let you organize different configurations for different environments.
@@ -320,7 +298,6 @@ The warning is informational - you can still track these files, but be careful w
 | `myconfig apply` | Apply configuration locally |
 | `myconfig export <dest>` | Export to encrypted archive |
 | `myconfig import <archive>` | Import from archive |
-| `myconfig deploy <user@host>` | Deploy to remote host |
 
 ### Common Options
 
@@ -331,14 +308,12 @@ The warning is informational - you can still track these files, but be careful w
 | `--params, -p` | Extra parameters for package manager (e.g., `--classic`) |
 | `--dry-run` | Preview changes without applying |
 | `--keep-file` | Keep stored copy when removing config |
-| `--key, -i` | SSH key for remote deployment |
 | `--help` | Show help for any command |
 
 ## Requirements
 
 - Python 3.10+
 - OpenSSL (for encrypted export/import)
-- SSH key pair (for remote deployment)
 
 ## License
 

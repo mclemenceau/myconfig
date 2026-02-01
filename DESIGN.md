@@ -12,12 +12,11 @@ A portable configuration management tool for quickly restoring your environment 
 - Rapid development and easy iteration
 - User already familiar with Python
 - Ubuntu (target OS) always has Python 3 installed
-- Rich ecosystem for CLI tools, SSH, and YAML handling
+- Rich ecosystem for CLI tools and YAML handling
 
 **Trade-off**: Not a single binary like Go/Rust would provide. Mitigated by:
 - Using pipx for clean isolated installation
 - Target machines (Ubuntu) have Python pre-installed
-- Remote deploy works via SSH where Python is also available
 
 ### Configuration Format: YAML
 
@@ -162,25 +161,6 @@ myconfig add app helix -m cargo   # explicit manager
 **Alternative considered**: age encryption
 - Cleaner design but requires additional tool installation
 - OpenSSL is more universally available
-
-### Remote Deployment: Full Automation via SSH
-
-**Decision**: Single command deploys everything to remote host
-
-**Rationale**:
-- Main use case: quickly set up a new VM/container
-- Reduces friction to "feel at home" on any machine
-- SSH is the standard for remote Linux administration
-
-**Flow**:
-1. Connect via SSH (key-based auth)
-2. Optionally add public key to `authorized_keys`
-3. Create encrypted archive, SCP to remote
-4. Decrypt and extract on remote
-5. Install packages (requires sudo)
-6. Copy config files to correct locations
-
-**Dependency**: paramiko (pure Python SSH library)
 
 ## Directory Structure
 
