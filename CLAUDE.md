@@ -4,10 +4,17 @@ This file provides guidance to AI AGENT when working with code in this repositor
 
 ## Project Overview
 
-## Build and Development Commands
+## Development Life Cycle
+- **Implement TDD**: create tests for new functionality and bug fixes
+- **Validate**: Run linting and unit tests before commit 
+
+## Build and Development Key Commands
+
+- **Test:** 'make test'
+- **Lint:** 'make link'
+- **Test:** 'make test'
 
 ## Testing
-
 
 ## Git Workflow
 
