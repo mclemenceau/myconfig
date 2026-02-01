@@ -138,6 +138,12 @@ myconfig apply
 # Apply specific profile
 myconfig apply --profile work
 
+# Only install apps (skip config files)
+myconfig apply --app
+
+# Only apply config files (skip app installation)
+myconfig apply --config
+
 # Preview changes without applying
 myconfig apply --dry-run
 ```
@@ -146,6 +152,8 @@ This will:
 1. Install tracked apps using preferred package managers
 2. Backup existing config files (creates `.bak.<timestamp>` files)
 3. Copy tracked configs to their correct locations
+
+Use `--app` or `--config` to apply only one category. When neither flag is given, both are applied.
 
 ### Export and Import
 
@@ -315,7 +323,7 @@ The warning is informational - you can still track these files, but be careful w
 | `myconfig list` | List tracked items |
 | `myconfig status` | Check for changed files |
 | `myconfig sync` | Sync modified files to storage |
-| `myconfig apply` | Apply configuration locally |
+| `myconfig apply [--app] [--config]` | Apply configuration locally |
 | `myconfig export <dest>` | Export to encrypted archive |
 | `myconfig import <archive>` | Import from archive |
 | `myconfig git push` | Commit and push config to remote |
@@ -329,6 +337,8 @@ The warning is informational - you can still track these files, but be careful w
 | `--manager, -m` | Package manager (apt/snap/cargo/npm, default: apt) |
 | `--params, -p` | Extra parameters for package manager (e.g., `--classic`) |
 | `--dry-run` | Preview changes without applying |
+| `--app` | Only install apps (apply command) |
+| `--config` | Only apply config files (apply command) |
 | `--keep-file` | Keep stored copy when removing config |
 | `--help` | Show help for any command |
 

@@ -488,36 +488,50 @@ def sync(profile: str | None, dry_run: bool):
 @main.command()
 @click.option("--profile", "-p", default="base", help="Profile to apply")
 @click.option("--dry-run", is_flag=True, help="Show what would change")
-def apply(profile: str, dry_run: bool):
-    """Apply configuration to the local system."""
+@click.option("--app", is_flag=True, help="Only install apps")
+@click.option("--config", is_flag=True, help="Only apply config files")
+def apply(profile: str, dry_run: bool, app: bool, config: bool):
+    """Apply configuration to the local system.
+
+    By default, installs apps and applies config files. Use --app or --config
+    to apply only one category.
+    """
     from .files import apply_configs
     from .packages import install_apps
     from .profiles import resolve_profile
 
-    config = ensure_initialized()
+    cfg = ensure_initialized()
 
-    if profile not in config["profiles"]:
+    if profile not in cfg["profiles"]:
         raise click.ClickException(f"Profile not found: {profile}")
 
+    # If neither flag is set, apply both
+    apply_apps = app or not config
+    apply_cfgs = config or not app
+
     # Resolve profile with inheritance
-    resolved = resolve_profile(config, profile)
+    resolved = resolve_profile(cfg, profile)
 
     click.echo(f"Applying profile: {profile}")
     if dry_run:
         click.secho("(dry-run mode - no changes will be made)", fg="yellow")
 
     # Install apps
-    apps = resolved.get("apps", {})
-    if apps:
-        total = sum(len(pkgs) for pkgs in apps.values() if isinstance(pkgs, list))
-        click.echo(f"\nInstalling {total} app(s)...")
-        install_apps(apps, dry_run=dry_run)
+    if apply_apps:
+        apps = resolved.get("apps", {})
+        if apps:
+            total = sum(
+                len(pkgs) for pkgs in apps.values() if isinstance(pkgs, list)
+            )
+            click.echo(f"\nInstalling {total} app(s)...")
+            install_apps(apps, dry_run=dry_run)
 
     # Apply configs
-    configs = resolved.get("configs", [])
-    if configs:
-        click.echo(f"\nApplying {len(configs)} config file(s)...")
-        apply_configs(configs, dry_run=dry_run)
+    if apply_cfgs:
+        configs = resolved.get("configs", [])
+        if configs:
+            click.echo(f"\nApplying {len(configs)} config file(s)...")
+            apply_configs(configs, dry_run=dry_run)
 
     if not dry_run:
         click.secho("\nDone!", fg="green")
