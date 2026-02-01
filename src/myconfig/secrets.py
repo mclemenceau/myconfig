@@ -1,4 +1,4 @@
-"""Secret detection for my-config."""
+"""Secret detection for myconfig."""
 
 import re
 from pathlib import Path

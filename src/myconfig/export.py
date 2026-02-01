@@ -1,4 +1,4 @@
-"""Export and import functionality for my-config."""
+"""Export and import functionality for myconfig."""
 
 import hashlib
 import subprocess
@@ -25,7 +25,7 @@ def create_archive(destination: Path, password: str) -> Path:
     config_dir = get_config_dir()
 
     if not config_dir.exists():
-        msg = "Configuration not initialized. Run 'my-config init' first."
+        msg = "Configuration not initialized. Run 'myconfig init' first."
         raise click.ClickException(msg)
 
     # Determine output path

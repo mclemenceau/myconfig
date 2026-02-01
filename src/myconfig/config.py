@@ -1,4 +1,4 @@
-"""Configuration management for my-config."""
+"""Configuration management for myconfig."""
 
 from pathlib import Path
 from typing import Any
@@ -12,7 +12,7 @@ FILES_DIR = "files"
 
 
 def get_config_dir() -> Path:
-    """Get the my-config configuration directory."""
+    """Get the myconfig configuration directory."""
     return DEFAULT_CONFIG_DIR
 
 
@@ -46,7 +46,7 @@ def load_config() -> dict[str, Any]:
     """
     config_path = get_config_path()
     if not config_path.exists():
-        msg = f"Not found at {config_path}. Run 'my-config init' first."
+        msg = f"Not found at {config_path}. Run 'myconfig init' first."
         raise FileNotFoundError(msg)
 
     with open(config_path) as f:
@@ -71,7 +71,7 @@ def save_config(config: dict[str, Any]) -> None:
 
 
 def ensure_initialized() -> dict[str, Any]:
-    """Ensure my-config is initialized, return config.
+    """Ensure myconfig is initialized, return config.
 
     Raises FileNotFoundError with helpful message if not initialized.
     """

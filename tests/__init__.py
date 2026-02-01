@@ -1,1 +1,1 @@
-"""Tests for my-config."""
+"""Tests for myconfig."""
