@@ -55,13 +55,27 @@ profiles:
 - Easy to understand what's being tracked
 - Mirrors home directory structure for clarity
 
-**Alternative considered**: Git-backed repository
-- Rejected for initial version to keep things simple
-- Can be added later as optional sync mechanism
-
 **Sync workflow**: Files can flow in both directions:
 - `apply` copies stored files → system (restore configuration)
 - `sync` copies system files → storage (capture changes)
+
+### Git Sync: Optional Remote Backup
+
+**Decision**: Optional git-backed storage for version control and cloud sync
+
+**Rationale**:
+- Enables syncing config between machines via `git push`/`git pull`
+- Version history for configuration changes comes for free
+- Works with any git remote (GitHub, GitLab, self-hosted)
+- Opt-in via `myconfig init --git <url>` — doesn't affect users who don't want git
+
+**Design**:
+- The entire `~/.config/myconfig/` directory becomes the git repo
+- Both `config.yml` and `files/` are tracked in git
+- Uses subprocess calls to system `git` — no Python git dependencies
+- `.gitignore` auto-created with `*.bak.*` to exclude backup files
+- `myconfig git push` stages all, commits with date-stamped message, pushes
+- `myconfig git pull` pulls latest from remote
 
 ### Path Handling: Relative to $HOME
 
@@ -179,8 +193,7 @@ myconfig add app helix -m cargo   # explicit manager
 
 Features intentionally deferred for simplicity:
 
-1. **Git sync**: Optional git-backed storage for version control and cloud sync
-2. **Flatpak support**: Additional package manager
+1. **Flatpak support**: Additional package manager
 3. **Template variables**: e.g., `{{hostname}}` in config files
 4. **Hooks**: Pre/post apply scripts
 5. **Diff viewer**: Interactive diff before applying changes
