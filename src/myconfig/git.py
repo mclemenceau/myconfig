@@ -72,7 +72,7 @@ def git_init_with_empty_remote(url: str) -> None:
     _run_git("branch", "-M", "main")
 
 
-def git_push() -> None:
+def git_push(message: str | None = None) -> None:
     """Stage all changes, commit, and push."""
     result = _run_git("add", ".")
     if result.returncode != 0:
@@ -87,7 +87,10 @@ def git_push() -> None:
         return
 
     today = date.today().isoformat()
-    result = _run_git("commit", "-m", f"myconfig: sync {today}")
+    commit_msg = f"myconfig: sync {today}"
+    if message:
+        commit_msg += f"\n\n{message}"
+    result = _run_git("commit", "-m", commit_msg)
     if result.returncode != 0:
         raise click.ClickException(
             f"git commit failed: {result.stderr.strip()}"

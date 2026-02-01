@@ -71,6 +71,25 @@ def test_git_push_nothing_to_commit(mock_dir, mock_which, mock_run, tmp_path):
     git_push()
 
 
+@patch("subprocess.run")
+@patch("shutil.which", return_value="/usr/bin/git")
+@patch("myconfig.git.get_config_dir")
+def test_git_push_with_message(mock_dir, mock_which, mock_run, tmp_path):
+    """Test push includes custom message in commit."""
+    mock_dir.return_value = tmp_path
+    mock_run.side_effect = [
+        MagicMock(returncode=0),  # git add .
+        MagicMock(returncode=1),  # git diff --cached --quiet (has changes)
+        MagicMock(returncode=0),  # git commit
+        MagicMock(returncode=0),  # git push
+    ]
+    git_push(message="Updated vim config")
+    commit_call = mock_run.call_args_list[2]
+    commit_msg = commit_call[0][0][3]  # ["git", "commit", "-m", <msg>]
+    assert "Updated vim config" in commit_msg
+    assert "myconfig: sync" in commit_msg
+
+
 @patch("shutil.which", return_value=None)
 def test_run_git_no_git_installed(mock_which):
     """Test error when git is not installed."""

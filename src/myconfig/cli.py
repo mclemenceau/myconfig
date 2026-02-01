@@ -580,7 +580,9 @@ def git_group():
 
 
 @git_group.command("push")
-def git_push_cmd():
+@click.option("-m", "--message", default=None,
+              help="Optional commit message explaining the change.")
+def git_push_cmd(message: str | None):
     """Commit and push all changes to remote."""
     ensure_initialized()
     if not is_git_repo():
@@ -588,7 +590,7 @@ def git_push_cmd():
             "Not a git repo. Run 'myconfig init --git <url>' first."
         )
     ensure_gitignore()
-    git_push()
+    git_push(message=message)
 
 
 @git_group.command("pull")
