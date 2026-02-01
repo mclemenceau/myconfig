@@ -50,64 +50,26 @@ def git_clone(url: str, dest: Path) -> None:
         )
 
 
-def git_init_and_add_remote(url: str) -> None:
-    """Initialize git repo and add remote origin."""
+def remote_is_empty(url: str) -> bool:
+    """Check if a remote repository has any refs."""
+    result = subprocess.run(
+        ["git", "ls-remote", "--heads", url],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0 and not result.stdout.strip()
+
+
+def git_init_with_empty_remote(url: str) -> None:
+    """Set up git for an empty remote — init, commit, push."""
     result = _run_git("init")
     if result.returncode != 0:
         raise click.ClickException(
             f"git init failed: {result.stderr.strip()}"
         )
 
-    result = _run_git("remote", "add", "origin", url)
-    if result.returncode != 0:
-        raise click.ClickException(
-            f"git remote add failed: {result.stderr.strip()}"
-        )
-
-    result = _run_git("fetch", "origin")
-    if result.returncode != 0:
-        raise click.ClickException(
-            f"git fetch failed: {result.stderr.strip()}"
-        )
-
-    branch = _detect_default_branch()
-
-    # Check if remote has the branch
-    result = _run_git(
-        "rev-parse", "--verify", f"origin/{branch}",
-    )
-    if result.returncode == 0:
-        # Remote has content — merge it into local
-        _run_git("checkout", "-b", branch)
-        _run_git(
-            "branch", "--set-upstream-to", f"origin/{branch}",
-        )
-        result = _run_git(
-            "merge", f"origin/{branch}",
-            "--allow-unrelated-histories",
-        )
-        if result.returncode != 0:
-            raise click.ClickException(
-                f"git merge failed: {result.stderr.strip()}"
-            )
-    else:
-        # Remote is empty, just create the branch locally
-        _run_git("checkout", "-b", branch)
-        _run_git(
-            "remote", "set-head", "origin", branch,
-        )
-
-
-def _detect_default_branch() -> str:
-    """Detect the default branch name from origin."""
-    result = _run_git("remote", "show", "origin")
-    if result.returncode == 0:
-        for line in result.stdout.splitlines():
-            if "HEAD branch:" in line:
-                name = line.split(":")[-1].strip()
-                if name and name != "(unknown)":
-                    return name
-    return "main"
+    _run_git("remote", "add", "origin", url)
+    _run_git("branch", "-M", "main")
 
 
 def git_push() -> None:
