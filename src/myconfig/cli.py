@@ -513,29 +513,5 @@ def import_config(archive: str, password: str):
     click.secho("Import complete!", fg="green")
 
 
-@main.command()
-@click.argument("target")
-@click.option("--profile", "-p", default="base", help="Profile to deploy")
-@click.option("--key", "-i", type=click.Path(exists=True), help="SSH key")
-def deploy(target: str, profile: str, key: str | None):
-    """Deploy configuration to a remote host via SSH.
-
-    TARGET is user@host (e.g., ubuntu@192.168.1.50)
-
-    Package installation requires sudo access on the remote host.
-    If sudo requires a password, you will be prompted interactively.
-    """
-    from .deploy import remote_deploy
-
-    config = ensure_initialized()
-
-    if profile not in config["profiles"]:
-        raise click.ClickException(f"Profile not found: {profile}")
-
-    click.echo(f"Deploying profile '{profile}' to {target}...")
-    remote_deploy(target, profile, key_path=key)
-    click.secho("Deployment complete!", fg="green")
-
-
 if __name__ == "__main__":
     main()
