@@ -1,4 +1,4 @@
-"""Package manager abstraction for my-config."""
+"""Package manager abstraction for myconfig."""
 
 import shutil
 import subprocess

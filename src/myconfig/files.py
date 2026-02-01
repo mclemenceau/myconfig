@@ -1,4 +1,4 @@
-"""File operations for my-config."""
+"""File operations for myconfig."""
 
 import shutil
 from datetime import datetime

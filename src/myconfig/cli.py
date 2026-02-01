@@ -1,4 +1,4 @@
-"""Command-line interface for my-config."""
+"""Command-line interface for myconfig."""
 
 import shutil
 from pathlib import Path
@@ -33,7 +33,7 @@ def main():
 
 @main.command()
 def init():
-    """Initialize my-config in ~/.config/myconfig/."""
+    """Initialize myconfig in ~/.config/myconfig/."""
     config_dir = get_config_dir()
     config_path = get_config_path()
     files_dir = get_files_dir()
@@ -49,7 +49,7 @@ def init():
     # Create default config
     save_config(default_config())
 
-    click.echo(f"Initialized my-config at {config_dir}")
+    click.echo(f"Initialized myconfig at {config_dir}")
     click.echo(f"  Config file: {config_path}")
     click.echo(f"  Files directory: {files_dir}")
 

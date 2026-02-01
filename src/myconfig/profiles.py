@@ -1,4 +1,4 @@
-"""Profile inheritance logic for my-config."""
+"""Profile inheritance logic for myconfig."""
 
 from typing import Any
 
