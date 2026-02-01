@@ -17,6 +17,14 @@ from .config import (
     relative_to_path,
     save_config,
 )
+from .git import (
+    ensure_gitignore,
+    git_clone,
+    git_init_and_add_remote,
+    git_pull,
+    git_push,
+    is_git_repo,
+)
 from .secrets import check_secrets
 
 
@@ -32,11 +40,38 @@ def main():
 
 
 @main.command()
-def init():
+@click.option("--git", "git_url", default=None,
+              help="Git remote URL to sync configuration")
+def init(git_url: str | None):
     """Initialize myconfig in ~/.config/myconfig/."""
     config_dir = get_config_dir()
     config_path = get_config_path()
     files_dir = get_files_dir()
+
+    if git_url:
+        # Clone if config dir doesn't exist yet
+        if not config_dir.exists():
+            click.echo(f"Cloning {git_url} to {config_dir}...")
+            git_clone(git_url, config_dir)
+            ensure_gitignore()
+            click.secho(f"Cloned to {config_dir}", fg="green")
+            return
+
+        # Init git in existing config dir
+        if not is_git_repo():
+            click.echo(
+                f"Adding git remote to existing config at {config_dir}..."
+            )
+            git_init_and_add_remote(git_url)
+            ensure_gitignore()
+            click.secho(
+                f"Git initialized with remote: {git_url}", fg="green"
+            )
+            return
+
+        # Already a git repo
+        click.echo(f"Already a git repo at {config_dir}")
+        return
 
     if config_path.exists():
         click.echo(f"Already initialized at {config_dir}")
@@ -511,6 +546,38 @@ def import_config(archive: str, password: str):
     click.echo(f"Importing from {archive_path}...")
     extract_archive(archive_path, password)
     click.secho("Import complete!", fg="green")
+
+
+# --- Git sync command group ---
+
+
+@main.group("git")
+def git_group():
+    """Sync configuration with a git remote."""
+    pass
+
+
+@git_group.command("push")
+def git_push_cmd():
+    """Commit and push all changes to remote."""
+    ensure_initialized()
+    if not is_git_repo():
+        raise click.ClickException(
+            "Not a git repo. Run 'myconfig init --git <url>' first."
+        )
+    ensure_gitignore()
+    git_push()
+
+
+@git_group.command("pull")
+def git_pull_cmd():
+    """Pull latest configuration from remote."""
+    ensure_initialized()
+    if not is_git_repo():
+        raise click.ClickException(
+            "Not a git repo. Run 'myconfig init --git <url>' first."
+        )
+    git_pull()
 
 
 if __name__ == "__main__":

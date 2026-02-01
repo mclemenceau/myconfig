@@ -160,6 +160,26 @@ myconfig export ~/backup/myconfig_backup.tar.gz.enc
 myconfig import /media/usb/myconfig_20250125_143022.tar.gz.enc
 ```
 
+### Git Sync
+
+Sync your configuration between machines using a git remote:
+
+```bash
+# Initialize with a git remote (fresh machine — clones the repo)
+myconfig init --git git@github.com:user/dotfiles.git
+
+# Or add git to an existing myconfig setup
+myconfig init --git git@github.com:user/dotfiles.git
+
+# After making changes (add apps, sync configs, etc.), push to remote
+myconfig git push
+
+# On another machine, pull the latest
+myconfig git pull
+```
+
+`myconfig git push` stages all changes, creates a date-stamped commit, and pushes. `myconfig git pull` pulls the latest from remote. You can also use regular git commands directly in `~/.config/myconfig/` for more control.
+
 ## Working with Profiles
 
 Profiles let you organize different configurations for different environments.
@@ -287,7 +307,7 @@ The warning is informational - you can still track these files, but be careful w
 
 | Command | Description |
 |---------|-------------|
-| `myconfig init` | Initialize myconfig |
+| `myconfig init [--git <url>]` | Initialize myconfig (optionally with git remote) |
 | `myconfig add app <name>` | Track an application |
 | `myconfig add config <path>` | Track a config file |
 | `myconfig remove app <name>` | Stop tracking an app |
@@ -298,6 +318,8 @@ The warning is informational - you can still track these files, but be careful w
 | `myconfig apply` | Apply configuration locally |
 | `myconfig export <dest>` | Export to encrypted archive |
 | `myconfig import <archive>` | Import from archive |
+| `myconfig git push` | Commit and push config to remote |
+| `myconfig git pull` | Pull latest config from remote |
 
 ### Common Options
 
@@ -314,6 +336,7 @@ The warning is informational - you can still track these files, but be careful w
 
 - Python 3.10+
 - OpenSSL (for encrypted export/import)
+- Git (for git sync feature)
 
 ## License
 
