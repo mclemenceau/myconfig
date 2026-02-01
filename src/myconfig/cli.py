@@ -20,10 +20,11 @@ from .config import (
 from .git import (
     ensure_gitignore,
     git_clone,
-    git_init_and_add_remote,
+    git_init_with_empty_remote,
     git_pull,
     git_push,
     is_git_repo,
+    remote_is_empty,
 )
 from .secrets import check_secrets
 
@@ -49,28 +50,35 @@ def init(git_url: str | None):
     files_dir = get_files_dir()
 
     if git_url:
-        # Clone if config dir doesn't exist yet
-        if not config_dir.exists():
+        if is_git_repo():
+            click.echo(f"Already a git repo at {config_dir}")
+            return
+
+        if remote_is_empty(git_url):
+            # Empty remote — init locally and push existing config
+            if not config_dir.exists():
+                config_dir.mkdir(parents=True, exist_ok=True)
+                files_dir.mkdir(parents=True, exist_ok=True)
+                save_config(default_config())
+
+            click.echo(f"Initializing git with remote {git_url}...")
+            git_init_with_empty_remote(git_url)
+            ensure_gitignore()
+            git_push()
+            click.secho(
+                f"Pushed config to {git_url}", fg="green"
+            )
+        else:
+            # Remote has content — clone it
+            if config_dir.exists():
+                backup = config_dir.with_suffix(".bak")
+                click.echo(f"Backing up {config_dir} to {backup}")
+                shutil.move(str(config_dir), str(backup))
+
             click.echo(f"Cloning {git_url} to {config_dir}...")
             git_clone(git_url, config_dir)
             ensure_gitignore()
             click.secho(f"Cloned to {config_dir}", fg="green")
-            return
-
-        # Init git in existing config dir
-        if not is_git_repo():
-            click.echo(
-                f"Adding git remote to existing config at {config_dir}..."
-            )
-            git_init_and_add_remote(git_url)
-            ensure_gitignore()
-            click.secho(
-                f"Git initialized with remote: {git_url}", fg="green"
-            )
-            return
-
-        # Already a git repo
-        click.echo(f"Already a git repo at {config_dir}")
         return
 
     if config_path.exists():
