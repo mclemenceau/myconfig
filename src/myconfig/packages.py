@@ -2,324 +2,139 @@
 
 import shutil
 import subprocess
-from abc import ABC, abstractmethod
 
 import click
 
+from .config import get_app_name, get_app_params
 
-class PackageManager(ABC):
-    """Base class for package managers."""
+
+class PackageManager:
+    """Base class for package managers.
+
+    Subclasses set the install command and override is_installed().
+    """
 
     name: str
+    install_cmd: list[str]
+    # Whether several packages can be installed in a single command
+    batch: bool = True
 
     @classmethod
-    @abstractmethod
     def is_available(cls) -> bool:
         """Check if this package manager is available on the system."""
-        pass
+        return shutil.which(cls.name) is not None
 
     @classmethod
-    @abstractmethod
-    def install(cls, package: str, params: str | None = None, dry_run: bool = False) -> bool:
+    def is_installed(cls, package: str) -> bool:
+        """Check if a package is installed."""
+        raise NotImplementedError
+
+    @classmethod
+    def _run(cls, cmd: list[str], dry_run: bool) -> bool:
+        if dry_run:
+            click.echo(f"    Would run: {' '.join(cmd)}")
+            return True
+        return subprocess.run(cmd).returncode == 0
+
+    @classmethod
+    def install(
+        cls, package: str, params: str | None = None, dry_run: bool = False
+    ) -> bool:
         """Install a package. Returns True on success."""
-        pass
+        cmd = list(cls.install_cmd)
+        if params:
+            cmd.extend(params.split())
+        cmd.append(package)
+        return cls._run(cmd, dry_run)
 
     @classmethod
-    @abstractmethod
     def install_batch(
         cls, packages: list[str], dry_run: bool = False
     ) -> tuple[list[str], list[str]]:
-        """Install multiple packages at once.
+        """Install the packages that are not already installed.
 
         Returns (successful, failed) tuple of package lists.
         """
-        pass
+        successful = []
+        to_install = []
+        for pkg in packages:
+            if cls.is_installed(pkg):
+                successful.append(pkg)
+            else:
+                to_install.append(pkg)
 
-    @classmethod
-    @abstractmethod
-    def is_installed(cls, package: str) -> bool:
-        """Check if a package is installed."""
-        pass
+        if not to_install:
+            return successful, []
 
-    @classmethod
-    @abstractmethod
-    def uninstall(cls, package: str, dry_run: bool = False) -> bool:
-        """Uninstall a package. Returns True on success."""
-        pass
+        if cls.batch and cls._run(cls.install_cmd + to_install, dry_run):
+            return successful + to_install, []
+
+        # Install one by one, which also identifies batch failures
+        failed = []
+        for pkg in to_install:
+            if cls.install(pkg, dry_run=dry_run):
+                successful.append(pkg)
+            else:
+                failed.append(pkg)
+        return successful, failed
 
 
 class AptManager(PackageManager):
     """APT package manager (Debian/Ubuntu)."""
 
     name = "apt"
-
-    @classmethod
-    def is_available(cls) -> bool:
-        return shutil.which("apt") is not None
-
-    @classmethod
-    def install(cls, package: str, params: str | None = None, dry_run: bool = False) -> bool:
-        cmd = ["sudo", "apt", "install", "-y"]
-        if params:
-            cmd.extend(params.split())
-        cmd.append(package)
-        if dry_run:
-            click.echo(f"    Would run: {' '.join(cmd)}")
-            return True
-        try:
-            subprocess.run(cmd, check=True)
-            return True
-        except subprocess.CalledProcessError:
-            return False
-
-    @classmethod
-    def install_batch(
-        cls, packages: list[str], dry_run: bool = False
-    ) -> tuple[list[str], list[str]]:
-        # Filter out already installed packages
-        to_install = [p for p in packages if not cls.is_installed(p)]
-        already_installed = [p for p in packages if cls.is_installed(p)]
-
-        if not to_install:
-            return packages, []
-
-        cmd = ["sudo", "apt", "install", "-y"] + to_install
-        if dry_run:
-            click.echo(f"    Would run: {' '.join(cmd)}")
-            return packages, []
-
-        try:
-            subprocess.run(cmd, check=True)
-            return packages, []
-        except subprocess.CalledProcessError:
-            # Fall back to individual installation to identify failures
-            successful = list(already_installed)
-            failed = []
-            for pkg in to_install:
-                if cls.install(pkg, dry_run=False):
-                    successful.append(pkg)
-                else:
-                    failed.append(pkg)
-            return successful, failed
+    install_cmd = ["sudo", "apt", "install", "-y"]
 
     @classmethod
     def is_installed(cls, package: str) -> bool:
         result = subprocess.run(
-            ["dpkg", "-s", package],
+            ["dpkg-query", "-W", "-f=${Status}", package],
             capture_output=True,
+            text=True,
         )
-        return result.returncode == 0
-
-    @classmethod
-    def uninstall(cls, package: str, dry_run: bool = False) -> bool:
-        cmd = ["sudo", "apt", "remove", "-y", package]
-        if dry_run:
-            click.echo(f"    Would run: {' '.join(cmd)}")
-            return True
-        try:
-            subprocess.run(cmd, check=True)
-            return True
-        except subprocess.CalledProcessError:
-            return False
+        return result.stdout.strip() == "install ok installed"
 
 
 class SnapManager(PackageManager):
     """Snap package manager."""
 
     name = "snap"
-
-    @classmethod
-    def is_available(cls) -> bool:
-        return shutil.which("snap") is not None
-
-    @classmethod
-    def install(cls, package: str, params: str | None = None, dry_run: bool = False) -> bool:
-        cmd = ["sudo", "snap", "install"]
-        if params:
-            cmd.extend(params.split())
-        cmd.append(package)
-        if dry_run:
-            click.echo(f"    Would run: {' '.join(cmd)}")
-            return True
-        try:
-            subprocess.run(cmd, check=True)
-            return True
-        except subprocess.CalledProcessError:
-            return False
-
-    @classmethod
-    def install_batch(
-        cls, packages: list[str], dry_run: bool = False
-    ) -> tuple[list[str], list[str]]:
-        # Filter out already installed packages
-        to_install = [p for p in packages if not cls.is_installed(p)]
-        already_installed = [p for p in packages if cls.is_installed(p)]
-
-        if not to_install:
-            return packages, []
-
-        # Snap can install multiple packages at once
-        cmd = ["sudo", "snap", "install"] + to_install
-        if dry_run:
-            click.echo(f"    Would run: {' '.join(cmd)}")
-            return packages, []
-
-        try:
-            subprocess.run(cmd, check=True)
-            return packages, []
-        except subprocess.CalledProcessError:
-            # Fall back to individual installation to identify failures
-            successful = list(already_installed)
-            failed = []
-            for pkg in to_install:
-                if cls.install(pkg, dry_run=False):
-                    successful.append(pkg)
-                else:
-                    failed.append(pkg)
-            return successful, failed
+    install_cmd = ["sudo", "snap", "install"]
 
     @classmethod
     def is_installed(cls, package: str) -> bool:
-        result = subprocess.run(
-            ["snap", "list", package],
-            capture_output=True,
-        )
+        result = subprocess.run(["snap", "list", package], capture_output=True)
         return result.returncode == 0
-
-    @classmethod
-    def uninstall(cls, package: str, dry_run: bool = False) -> bool:
-        cmd = ["sudo", "snap", "remove", package]
-        if dry_run:
-            click.echo(f"    Would run: {' '.join(cmd)}")
-            return True
-        try:
-            subprocess.run(cmd, check=True)
-            return True
-        except subprocess.CalledProcessError:
-            return False
 
 
 class CargoManager(PackageManager):
     """Cargo package manager (Rust)."""
 
     name = "cargo"
-
-    @classmethod
-    def is_available(cls) -> bool:
-        return shutil.which("cargo") is not None
-
-    @classmethod
-    def install(cls, package: str, params: str | None = None, dry_run: bool = False) -> bool:
-        cmd = ["cargo", "install"]
-        if params:
-            cmd.extend(params.split())
-        cmd.append(package)
-        if dry_run:
-            click.echo(f"    Would run: {' '.join(cmd)}")
-            return True
-        try:
-            subprocess.run(cmd, check=True)
-            return True
-        except subprocess.CalledProcessError:
-            return False
-
-    @classmethod
-    def install_batch(
-        cls, packages: list[str], dry_run: bool = False
-    ) -> tuple[list[str], list[str]]:
-        # Cargo doesn't batch well, install sequentially
-        successful = []
-        failed = []
-        for pkg in packages:
-            if cls.is_installed(pkg):
-                successful.append(pkg)
-            elif cls.install(pkg, dry_run=dry_run):
-                successful.append(pkg)
-            else:
-                failed.append(pkg)
-        return successful, failed
+    install_cmd = ["cargo", "install"]
+    # One failing crate would abort the whole batch after a long build
+    batch = False
 
     @classmethod
     def is_installed(cls, package: str) -> bool:
-        # Check if binary exists in cargo bin
-        cargo_home = subprocess.run(
-            ["cargo", "--version"],
-            capture_output=True,
-            text=True,
+        # Crates are listed unindented as "<name> v<version>:"
+        result = subprocess.run(
+            ["cargo", "install", "--list"], capture_output=True, text=True
         )
-        if cargo_home.returncode != 0:
+        if result.returncode != 0:
             return False
-
-        # Simple check: see if the binary exists
-        return shutil.which(package) is not None
-
-    @classmethod
-    def uninstall(cls, package: str, dry_run: bool = False) -> bool:
-        cmd = ["cargo", "uninstall", package]
-        if dry_run:
-            click.echo(f"    Would run: {' '.join(cmd)}")
-            return True
-        try:
-            subprocess.run(cmd, check=True)
-            return True
-        except subprocess.CalledProcessError:
-            return False
+        return any(
+            line.split(" ", 1)[0] == package
+            for line in result.stdout.splitlines()
+            if line and not line[0].isspace()
+        )
 
 
 class NpmManager(PackageManager):
     """NPM package manager (Node.js)."""
 
     name = "npm"
-
-    @classmethod
-    def is_available(cls) -> bool:
-        return shutil.which("npm") is not None
-
-    @classmethod
-    def install(cls, package: str, params: str | None = None, dry_run: bool = False) -> bool:
-        cmd = ["npm", "install", "-g"]
-        if params:
-            cmd.extend(params.split())
-        cmd.append(package)
-        if dry_run:
-            click.echo(f"    Would run: {' '.join(cmd)}")
-            return True
-        try:
-            subprocess.run(cmd, check=True)
-            return True
-        except subprocess.CalledProcessError:
-            return False
-
-    @classmethod
-    def install_batch(
-        cls, packages: list[str], dry_run: bool = False
-    ) -> tuple[list[str], list[str]]:
-        # Filter out already installed packages
-        to_install = [p for p in packages if not cls.is_installed(p)]
-        already_installed = [p for p in packages if cls.is_installed(p)]
-
-        if not to_install:
-            return packages, []
-
-        # npm can install multiple packages at once
-        cmd = ["npm", "install", "-g"] + to_install
-        if dry_run:
-            click.echo(f"    Would run: {' '.join(cmd)}")
-            return packages, []
-
-        try:
-            subprocess.run(cmd, check=True)
-            return packages, []
-        except subprocess.CalledProcessError:
-            # Fall back to individual installation to identify failures
-            successful = list(already_installed)
-            failed = []
-            for pkg in to_install:
-                if cls.install(pkg, dry_run=False):
-                    successful.append(pkg)
-                else:
-                    failed.append(pkg)
-            return successful, failed
+    install_cmd = ["npm", "install", "-g"]
 
     @classmethod
     def is_installed(cls, package: str) -> bool:
@@ -329,47 +144,11 @@ class NpmManager(PackageManager):
         )
         return result.returncode == 0
 
-    @classmethod
-    def uninstall(cls, package: str, dry_run: bool = False) -> bool:
-        cmd = ["npm", "uninstall", "-g", package]
-        if dry_run:
-            click.echo(f"    Would run: {' '.join(cmd)}")
-            return True
-        try:
-            subprocess.run(cmd, check=True)
-            return True
-        except subprocess.CalledProcessError:
-            return False
 
-
-# Registry of available package managers
+# Registry of supported package managers
 MANAGERS: dict[str, type[PackageManager]] = {
-    "apt": AptManager,
-    "snap": SnapManager,
-    "cargo": CargoManager,
-    "npm": NpmManager,
+    m.name: m for m in (AptManager, SnapManager, CargoManager, NpmManager)
 }
-
-
-def get_available_managers() -> list[str]:
-    """Get list of available package managers on this system."""
-    return [name for name, mgr in MANAGERS.items() if mgr.is_available()]
-
-
-def get_app_name(item):
-    """Extract app name from a list item (string or dict)."""
-    if isinstance(item, str):
-        return item
-    elif isinstance(item, dict):
-        return list(item.keys())[0]
-    return None
-
-
-def get_app_params(item):
-    """Extract app params from a list item (string or dict)."""
-    if isinstance(item, dict):
-        return list(item.values())[0]
-    return None
 
 
 def install_apps(
@@ -379,22 +158,21 @@ def install_apps(
     """Install applications grouped by package manager.
 
     Args:
-        apps: Dict of manager_name -> list of package items (str or {name: params})
+        apps: Dict of manager name -> list of items (str or {name: params})
         dry_run: If True, only show what would be done
     """
-    available = get_available_managers()
-
     for manager_name, packages in apps.items():
         if not packages or not isinstance(packages, list):
             continue
 
-        if manager_name not in available:
-            click.secho(f"  Package manager not available: {manager_name}", fg="red")
+        mgr = MANAGERS.get(manager_name)
+        if mgr is None or not mgr.is_available():
+            click.secho(
+                f"  Package manager not available: {manager_name}", fg="red"
+            )
             for pkg in packages:
                 click.secho(f"    Skipping: {get_app_name(pkg)}", fg="yellow")
             continue
-
-        mgr = MANAGERS[manager_name]
 
         # Separate packages with params from simple ones
         simple_pkgs = []
@@ -409,8 +187,10 @@ def install_apps(
 
         # Batch install simple packages
         if simple_pkgs:
-            click.echo(f"  Installing via {manager_name}: {', '.join(simple_pkgs)}")
-            successful, failed = mgr.install_batch(simple_pkgs, dry_run=dry_run)
+            click.echo(
+                f"  Installing via {manager_name}: {', '.join(simple_pkgs)}"
+            )
+            successful, failed = mgr.install_batch(simple_pkgs, dry_run)
             if not dry_run:
                 for pkg in successful:
                     click.secho(f"    {pkg}: installed", fg="green")

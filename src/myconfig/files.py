@@ -55,64 +55,17 @@ def apply_configs(configs: list[str], dry_run: bool = False) -> None:
             continue
 
         # Backup existing file (only if different)
+        mode = None
         if target.exists():
+            mode = target.stat().st_mode
             backup = backup_file(target)
             if backup:
                 click.echo(f"  Backed up: {target} -> {backup.name}")
 
-        # Copy from storage
+        # Copy from storage, keeping the permissions of an existing file
+        # since git does not preserve them (e.g. 0600 on ~/.netrc)
         shutil.copy2(stored, target)
+        if mode is not None:
+            target.chmod(mode)
         click.secho(f"  Applied: {relative}", fg="green")
 
-
-def sync_config(relative: str) -> bool:
-    """Sync a config file from system to storage.
-
-    Returns True if file was updated, False otherwise.
-    """
-    stored = get_stored_file_path(relative)
-    source = relative_to_path(relative)
-
-    if not source.exists():
-        return False
-
-    # Check if different
-    if stored.exists():
-        if stored.read_bytes() == source.read_bytes():
-            return False
-
-    # Copy to storage
-    stored.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, stored)
-    return True
-
-
-def diff_config(relative: str) -> str | None:
-    """Get diff between stored and system version of a config.
-
-    Returns diff string, or None if files are identical or missing.
-    """
-    import difflib
-
-    stored = get_stored_file_path(relative)
-    actual = relative_to_path(relative)
-
-    if not stored.exists() or not actual.exists():
-        return None
-
-    try:
-        stored_lines = stored.read_text().splitlines(keepends=True)
-        actual_lines = actual.read_text().splitlines(keepends=True)
-    except UnicodeDecodeError:
-        return None  # Binary file
-
-    if stored_lines == actual_lines:
-        return None
-
-    diff = difflib.unified_diff(
-        stored_lines,
-        actual_lines,
-        fromfile=f"stored/{relative}",
-        tofile=f"system/{relative}",
-    )
-    return "".join(diff)

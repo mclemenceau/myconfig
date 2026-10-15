@@ -1,6 +1,9 @@
 """Command-line interface for myconfig."""
 
+import os
 import shutil
+import tempfile
+from datetime import datetime
 from pathlib import Path
 
 import click
@@ -9,6 +12,8 @@ from . import __version__
 from .config import (
     default_config,
     ensure_initialized,
+    get_app_name,
+    get_app_params,
     get_config_dir,
     get_config_path,
     get_files_dir,
@@ -16,6 +21,7 @@ from .config import (
     path_to_relative,
     relative_to_path,
     save_config,
+    validate_relative,
 )
 from .git import (
     ensure_gitignore,
@@ -55,9 +61,8 @@ def init(git_url: str | None):
             return
 
         if remote_is_empty(git_url):
-            # Empty remote — init locally and push existing config
-            if not config_dir.exists():
-                config_dir.mkdir(parents=True, exist_ok=True)
+            # Empty remote: init locally and push existing config
+            if not config_path.exists():
                 files_dir.mkdir(parents=True, exist_ok=True)
                 save_config(default_config())
 
@@ -69,14 +74,21 @@ def init(git_url: str | None):
                 f"Pushed config to {git_url}", fg="green"
             )
         else:
-            # Remote has content — clone it
-            if config_dir.exists():
-                backup = config_dir.with_suffix(".bak")
-                click.echo(f"Backing up {config_dir} to {backup}")
-                shutil.move(str(config_dir), str(backup))
-
+            # Remote has content: clone it next to the current config
+            # first, so a failed clone leaves the existing config alone.
             click.echo(f"Cloning {git_url} to {config_dir}...")
-            git_clone(git_url, config_dir)
+            config_dir.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(
+                dir=config_dir.parent, prefix=".myconfig-clone-"
+            ) as tmp:
+                clone_dir = Path(tmp) / "myconfig"
+                git_clone(git_url, clone_dir)
+                if config_dir.exists():
+                    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    backup = config_dir.with_name(f"myconfig.bak.{stamp}")
+                    click.echo(f"Backing up {config_dir} to {backup}")
+                    config_dir.rename(backup)
+                clone_dir.rename(config_dir)
             ensure_gitignore()
             click.secho(f"Cloned to {config_dir}", fg="green")
         return
@@ -109,7 +121,7 @@ def add():
 @add.command("config")
 @click.argument("path", type=click.Path(exists=True))
 @click.option(
-    "--profile", "-p", default="base", help="Profile to add to"
+    "--profile", "-P", default="base", help="Profile to add to"
 )
 def add_config(path: str, profile: str):
     """Add a config file to track.
@@ -118,8 +130,9 @@ def add_config(path: str, profile: str):
     """
     config = ensure_initialized()
 
-    # Resolve and normalize path
-    source = Path(path).expanduser().resolve()
+    # Normalize path, keeping symlinks so the path the user named is
+    # the one restored
+    source = Path(os.path.abspath(Path(path).expanduser()))
     if source.is_dir():
         raise click.ClickException(f"Cannot track directories: {source}")
 
@@ -153,25 +166,11 @@ def add_config(path: str, profile: str):
     click.echo(f"Added config: {relative} (profile: {profile})")
 
 
-def get_app_name(item):
-    """Extract app name from a list item (string or dict)."""
-    if isinstance(item, str):
-        return item
-    elif isinstance(item, dict):
-        return list(item.keys())[0]
-    return None
-
-
-def get_app_params(item):
-    """Extract app params from a list item (string or dict)."""
-    if isinstance(item, dict):
-        return list(item.values())[0]
-    return None
-
-
 @add.command("app")
 @click.argument("name")
-@click.option("--profile", "-P", default="base", help="Profile to add to")
+@click.option(
+    "--profile", "-P", default="base", help="Profile to add to"
+)
 @click.option(
     "--manager", "-m",
     type=click.Choice(["apt", "snap", "cargo", "npm"]),
@@ -181,7 +180,7 @@ def get_app_params(item):
 @click.option(
     "--params", "-p",
     default=None,
-    help="Extra parameters for the package manager (e.g., '--classic' for snap)",
+    help="Extra package manager parameters (e.g., '--classic' for snap)",
 )
 def add_app(name: str, profile: str, manager: str, params: str | None):
     """Add an application to track.
@@ -236,7 +235,7 @@ def remove():
 @remove.command("config")
 @click.argument("path")
 @click.option(
-    "--profile", "-p", default="base", help="Profile to remove from"
+    "--profile", "-P", default="base", help="Profile to remove from"
 )
 @click.option("--keep-file", is_flag=True, help="Keep the stored file")
 def remove_config(path: str, profile: str, keep_file: bool):
@@ -248,10 +247,10 @@ def remove_config(path: str, profile: str, keep_file: bool):
 
     # Normalize path
     if path.startswith("/") or path.startswith("~"):
-        source = Path(path).expanduser().resolve()
+        source = Path(os.path.abspath(Path(path).expanduser()))
         relative = path_to_relative(source)
     else:
-        relative = path
+        relative = validate_relative(path)
 
     # Check if profile exists
     if profile not in config["profiles"]:
@@ -331,12 +330,14 @@ def remove_app(name: str, profile: str):
 
 
 @main.command("list")
-@click.option("--profile", "-p", help="Show only this profile")
+@click.option(
+    "--profile", "-P", help="Show only this profile"
+)
 def list_items(profile: str | None):
     """List tracked apps and config files."""
     config = ensure_initialized()
 
-    profiles_to_show = [profile] if profile else list(config["profiles"].keys())
+    profiles_to_show = [profile] if profile else list(config["profiles"])
 
     for prof_name in profiles_to_show:
         if prof_name not in config["profiles"]:
@@ -388,7 +389,6 @@ def list_items(profile: str | None):
 def status():
     """Show status of tracked files (changed, missing, etc.)."""
     config = ensure_initialized()
-    get_files_dir()
 
     click.echo("Checking tracked files...\n")
 
@@ -415,8 +415,8 @@ def status():
         if changes:
             has_changes = True
             click.secho(f"[{prof_name}]", fg="cyan", bold=True)
-            for cfg, status, color in changes:
-                click.secho(f"  {cfg}: {status}", fg=color)
+            for cfg, state, color in changes:
+                click.secho(f"  {cfg}: {state}", fg=color)
 
     if not has_changes:
         click.secho("All tracked files are in sync.", fg="green")
@@ -426,7 +426,9 @@ def status():
 
 
 @main.command()
-@click.option("--profile", "-p", help="Sync only this profile")
+@click.option(
+    "--profile", "-P", help="Sync only this profile"
+)
 @click.option("--dry-run", is_flag=True, help="Show what would be synced")
 def sync(profile: str | None, dry_run: bool):
     """Sync modified system files back to storage.
@@ -438,7 +440,7 @@ def sync(profile: str | None, dry_run: bool):
     if dry_run:
         click.secho("(dry-run mode - no changes will be made)", fg="yellow")
 
-    profiles_to_sync = [profile] if profile else list(config["profiles"].keys())
+    profiles_to_sync = [profile] if profile else list(config["profiles"])
     synced_count = 0
 
     for prof_name in profiles_to_sync:
@@ -482,11 +484,13 @@ def sync(profile: str | None, dry_run: bool):
         click.secho(f"\nSynced {synced_count} file(s).", fg="green")
 
 
-# --- Placeholder commands for features to be implemented ---
+# --- Apply, export and import commands ---
 
 
 @main.command()
-@click.option("--profile", "-p", default="base", help="Profile to apply")
+@click.option(
+    "--profile", "-P", default="base", help="Profile to apply"
+)
 @click.option("--dry-run", is_flag=True, help="Show what would change")
 @click.option("--app", is_flag=True, help="Only install apps")
 @click.option("--config", is_flag=True, help="Only apply config files")

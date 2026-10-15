@@ -39,11 +39,7 @@ def is_git_repo() -> bool:
 
 def git_clone(url: str, dest: Path) -> None:
     """Clone a remote repository to dest."""
-    result = subprocess.run(
-        ["git", "clone", url, str(dest)],
-        capture_output=True,
-        text=True,
-    )
+    result = _run_git("clone", url, str(dest), cwd=Path.cwd())
     if result.returncode != 0:
         raise click.ClickException(
             f"git clone failed: {result.stderr.strip()}"
@@ -51,25 +47,30 @@ def git_clone(url: str, dest: Path) -> None:
 
 
 def remote_is_empty(url: str) -> bool:
-    """Check if a remote repository has any refs."""
-    result = subprocess.run(
-        ["git", "ls-remote", "--heads", url],
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode == 0 and not result.stdout.strip()
+    """Check if a remote repository has any refs.
+
+    Raises click.ClickException if the remote cannot be reached, so an
+    unreachable remote is never mistaken for one with content.
+    """
+    result = _run_git("ls-remote", "--heads", url, cwd=Path.cwd())
+    if result.returncode != 0:
+        raise click.ClickException(
+            f"Cannot access remote {url}: {result.stderr.strip()}"
+        )
+    return not result.stdout.strip()
 
 
 def git_init_with_empty_remote(url: str) -> None:
-    """Set up git for an empty remote — init, commit, push."""
-    result = _run_git("init")
-    if result.returncode != 0:
-        raise click.ClickException(
-            f"git init failed: {result.stderr.strip()}"
-        )
-
-    _run_git("remote", "add", "origin", url)
-    _run_git("branch", "-M", "main")
+    """Set up a local repo on branch main pointing at an empty remote."""
+    for args in (
+        ("init", "--initial-branch=main"),
+        ("remote", "add", "origin", url),
+    ):
+        result = _run_git(*args)
+        if result.returncode != 0:
+            raise click.ClickException(
+                f"git {args[0]} failed: {result.stderr.strip()}"
+            )
 
 
 def git_push(message: str | None = None) -> None:
