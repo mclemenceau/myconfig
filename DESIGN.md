@@ -35,7 +35,7 @@ profiles:
   base:
     apps:
       apt: [git, curl]
-      cargo: [helix]
+      cargo: [zoxide]
     configs:
       - .bashrc
       - .gitconfig
@@ -67,15 +67,19 @@ profiles:
 - Enables syncing config between machines via `git push`/`git pull`
 - Version history for configuration changes comes for free
 - Works with any git remote (GitHub, GitLab, self-hosted)
-- Opt-in via `myconfig init --git <url>` — doesn't affect users who don't want git
+- Opt-in via `myconfig init --git <url>` - doesn't affect users who don't want git
 
 **Design**:
 - The entire `~/.config/myconfig/` directory becomes the git repo
 - Both `config.yml` and `files/` are tracked in git
-- Uses subprocess calls to system `git` — no Python git dependencies
+- Uses subprocess calls to system `git` - no Python git dependencies
 - `.gitignore` auto-created with `*.bak.*` to exclude backup files
 - `myconfig git push` stages all, commits with date-stamped message, pushes
 - `myconfig git pull` pulls latest from remote
+- An unreachable remote is an error, never treated as "has content"
+- A non-empty remote is cloned into a temporary directory first; the
+  existing config is only moved to `myconfig.bak.<timestamp>` once the
+  clone succeeded, so a failed clone never loses data
 
 ### Path Handling: Relative to $HOME
 
@@ -85,6 +89,12 @@ profiles:
 - Portable across different usernames
 - Works when deploying to remote machines with different users
 - Intuitive for dotfiles which are typically in `$HOME`
+
+**Validation**: Only files under `$HOME` can be added. Every tracked path
+read from `config.yml` or an imported archive is checked to be relative and
+free of `..`, because `config.yml` may be hand-edited or pulled from a
+remote. Symlinks are not resolved when adding, so the path the user named
+is the one restored.
 
 ### CLI Style: Git-style Subcommands
 
@@ -117,7 +127,11 @@ profiles:
 **Decision**: Apps are grouped by package manager, enabling batch installation
 
 **Rationale**:
-- Efficient batch installation (`apt install pkg1 pkg2 pkg3`)
+- Efficient batch installation (`apt install pkg1 pkg2 pkg3`); if a batch
+  fails, packages are retried one by one to identify the failure. Cargo
+  always installs one by one since a failure would waste a long build
+- Already installed packages are skipped (`dpkg-query`, `snap list`,
+  `cargo install --list`, `npm list -g`)
 - Clear and explicit - no ambiguity about which manager installs what
 - Simpler config structure (lists instead of nested objects)
 - Default to apt when no manager specified (most common case)
@@ -128,14 +142,14 @@ profiles:
   base:
     apps:
       apt: [git, curl, htop]      # Installed via: apt install git curl htop
-      cargo: [helix, ripgrep]     # Installed via: cargo install helix ripgrep
+      cargo: [zoxide, bat]        # Installed one by one via cargo install
       snap: [spotify-client]
 ```
 
 **CLI**:
 ```bash
 myconfig add app git              # defaults to apt
-myconfig add app helix -m cargo   # explicit manager
+myconfig add app zoxide -m cargo  # explicit manager
 ```
 
 ### Conflict Handling: Backup Then Overwrite
@@ -148,6 +162,10 @@ myconfig add app helix -m cargo   # explicit manager
 - Recoverable - backups are right next to originals
 
 **Format**: `<filename>.bak.<YYYYMMDD_HHMMSS>`
+
+**Permissions**: When overwriting, the existing file's permissions are kept.
+Git does not store permissions, so a cloned `0644` copy must not widen a
+local `0600` credential file.
 
 ### Secret Detection: Warn But Don't Block
 
@@ -171,6 +189,10 @@ myconfig add app helix -m cargo   # explicit manager
 - OpenSSL is available everywhere (no extra dependencies)
 - Password-based encryption is simple for users
 - SHA256 checksum for integrity verification
+- The password reaches OpenSSL on stdin, never on its command line, where
+  other local users could read it from the process list
+- Import validates the whole archive before writing: only `config.yml` and
+  regular files under `files/` are accepted, and permissions are restored
 
 **Alternative considered**: age encryption
 - Cleaner design but requires additional tool installation
@@ -194,7 +216,7 @@ myconfig add app helix -m cargo   # explicit manager
 Features intentionally deferred for simplicity:
 
 1. **Flatpak support**: Additional package manager
-3. **Template variables**: e.g., `{{hostname}}` in config files
-4. **Hooks**: Pre/post apply scripts
-5. **Diff viewer**: Interactive diff before applying changes
-6. **Config validation**: Schema validation for tracked configs
+2. **Template variables**: e.g., `{{hostname}}` in config files
+3. **Hooks**: Pre/post apply scripts
+4. **Diff viewer**: Interactive diff before applying changes
+5. **Config validation**: Schema validation for tracked configs
