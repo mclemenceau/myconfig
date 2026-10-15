@@ -1,27 +1,50 @@
-# AGENT.md
+# CLAUDE.md
 
-This file provides guidance to AI AGENT when working with code in this repository.
+This file provides guidance to AI agents working with code in this
+repository.
 
 ## Project Overview
 
+`myconfig` is a Python CLI (Click + PyYAML) that tracks apps and dotfiles
+and restores them on Ubuntu machines. Sources live in `src/myconfig/`:
+
+- `cli.py` - all commands
+- `config.py` - config.yml I/O, path handling and validation
+- `profiles.py` - profile inheritance
+- `packages.py` - apt/snap/cargo/npm managers
+- `files.py` - applying configs with backups
+- `export.py` - encrypted export/import (OpenSSL)
+- `git.py` - git sync
+- `secrets.py` - secret detection warnings
+
+See DESIGN.md for design decisions.
+
 ## Development Life Cycle
+
 - **Implement TDD**: create tests for new functionality and bug fixes
-- **Validate**: Run linting and unit tests before commit 
+- **Validate**: Run linting and unit tests before commit
 
 ## Build and Development Key Commands
 
-- **Test:** 'make test'
-- **Lint:** 'make link'
-- **Test:** 'make test'
+```bash
+make deps   # create .venv and install with dev dependencies
+make lint   # ruff check src tests
+make test   # pytest with coverage
+```
 
 ## Testing
+
+- Tests use the `home` fixture (tests/conftest.py) to point `$HOME` at a
+  temporary directory. Never write tests that touch the real `$HOME`.
+- Prefer end-to-end tests through the `run` fixture (Click CliRunner).
+- Never call real package managers in tests: mock `_run`/`is_installed`.
 
 ## Git Workflow
 
 ### Branch Naming
 
-- `fix/` - bug fixes (e.g., `fix/jira-search-issues`)
-- `feature/` - new features (e.g., `feature/add-priority-sync`)
+- `fix/` - bug fixes (e.g., `fix/export-permissions`)
+- `feature/` - new features (e.g., `feature/flatpak-support`)
 - `chore/` - maintenance tasks (e.g., `chore/update-dependencies`)
 
 ### Commit Messages
@@ -42,9 +65,9 @@ Follow the 50/72 rule:
 
 **Examples:**
 ```
-fix(jira): use enhanced search API for issues
-feat(sync): add component mapping support
-docs: update AGENT.md with git workflow
+fix(export): pass password to openssl on stdin
+feat(cli): add --app and --config flags to apply
+docs: update CLAUDE.md with git workflow
 ```
 
 ### Pull Requests

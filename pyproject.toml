@@ -1,28 +1,30 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "myconfig"
 version = "0.1.0"
-description = "Portable configuration management tool for quickly restoring your environment on any machine"
+description = "Track your apps and dotfiles, restore them on any Ubuntu machine"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
-    {name = "mclemenceau"}
+    {name = "Matthieu Clemenceau"}
 ]
 keywords = ["dotfiles", "configuration", "backup", "restore", "cli"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: System :: Systems Administration",
     "Topic :: Utilities",
 ]
@@ -37,6 +39,10 @@ dev = [
     "pytest-cov",
     "ruff",
 ]
+
+[project.urls]
+Homepage = "https://github.com/mclemenceau/myconfig"
+Issues = "https://github.com/mclemenceau/myconfig/issues"
 
 [project.scripts]
 myconfig = "myconfig.cli:main"

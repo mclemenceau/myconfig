@@ -32,14 +32,20 @@ CONTENT_PATTERNS = [
      "Possible password found"),
     (r"(?i)token\s*[=:]\s*['\"]?[a-zA-Z0-9_-]{20,}",
      "Possible token found"),
-    (r"-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----",
+    (r"-----BEGIN (RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----",
      "Private key found"),
     (r"ghp_[a-zA-Z0-9]{36}",
      "GitHub personal access token found"),
     (r"gho_[a-zA-Z0-9]{36}",
      "GitHub OAuth token found"),
-    (r"sk-[a-zA-Z0-9]{48}",
-     "Possible OpenAI API key found"),
+    (r"github_pat_[a-zA-Z0-9_]{22,}",
+     "GitHub fine-grained token found"),
+    (r"glpat-[a-zA-Z0-9_-]{20,}",
+     "GitLab personal access token found"),
+    (r"AKIA[0-9A-Z]{16}",
+     "AWS access key ID found"),
+    (r"sk-(ant-|proj-)?[a-zA-Z0-9_-]{40,}",
+     "Possible AI provider API key found"),
 ]
 
 

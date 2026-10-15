@@ -1,13 +1,20 @@
 # myconfig
 
-A portable configuration management tool for quickly restoring your environment on any machine.
+[![CI](https://github.com/mclemenceau/myconfig/actions/workflows/ci.yml/badge.svg)](https://github.com/mclemenceau/myconfig/actions/workflows/ci.yml)
 
-Track your favorite apps and dotfiles, export them to a USB drive, and restore on any Ubuntu machine in seconds.
+A portable configuration management tool for quickly restoring your
+environment on any machine.
+
+Track your favorite apps and dotfiles, sync them through git or export them
+to a USB drive, and restore them on any Ubuntu machine in seconds.
 
 ## Installation
 
 ```bash
 # Using pipx (recommended)
+pipx install git+https://github.com/mclemenceau/myconfig.git
+
+# Or from a local checkout
 pipx install .
 
 # Or with pip in a virtual environment
@@ -24,7 +31,7 @@ myconfig init
 
 # Track some apps (apt is the default package manager)
 myconfig add app git
-myconfig add app helix -m cargo   # use cargo for helix
+myconfig add app zoxide -m cargo   # use cargo for zoxide
 myconfig add app ripgrep
 
 # Track config files
@@ -45,7 +52,7 @@ myconfig list
 myconfig add app curl
 
 # Add an app with specific package manager
-myconfig add app helix --manager cargo    # or -m cargo
+myconfig add app zoxide --manager cargo   # or -m cargo
 myconfig add app spotify-client -m snap
 
 # Add an app with extra package manager parameters
@@ -57,16 +64,16 @@ myconfig add config ~/.bashrc
 myconfig add config ~/.ssh/config
 myconfig add config ~/.config/starship.toml
 
-# Add to a specific profile
+# Add to a specific profile (--profile or -P)
 myconfig add app docker --profile work
-myconfig add config ~/.config/work-vpn.conf --profile work
+myconfig add config ~/.config/work-vpn.conf -P work
 ```
 
 ### Removing Apps and Configs
 
 ```bash
 # Remove an app
-myconfig remove app helix
+myconfig remove app zoxide
 
 # Remove a config (also deletes stored copy)
 myconfig remove config ~/.bashrc
@@ -99,7 +106,7 @@ Example output:
 [base]
   Apps:
     apt: git, ripgrep, curl
-    cargo: helix
+    cargo: zoxide
   Configs:
     [+] .bashrc
     [+] .gitconfig
@@ -173,10 +180,7 @@ myconfig import /media/usb/myconfig_20250125_143022.tar.gz.enc
 Sync your configuration between machines using a git remote:
 
 ```bash
-# Initialize with a git remote (fresh machine — clones the repo)
-myconfig init --git git@github.com:user/dotfiles.git
-
-# Or add git to an existing myconfig setup
+# Initialize with a git remote
 myconfig init --git git@github.com:user/dotfiles.git
 
 # After making changes (add apps, sync configs, etc.), push to remote
@@ -186,7 +190,24 @@ myconfig git push
 myconfig git pull
 ```
 
-`myconfig git push` stages all changes, creates a date-stamped commit, and pushes. `myconfig git pull` pulls the latest from remote. You can also use regular git commands directly in `~/.config/myconfig/` for more control.
+`init --git` behaves differently depending on the remote:
+
+- **Empty remote**: your existing configuration (or a fresh one) is
+  committed and pushed to it.
+- **Remote with content** (e.g. on a new machine): the remote is cloned.
+  Any existing `~/.config/myconfig/` is moved to
+  `~/.config/myconfig.bak.<timestamp>`, only once the clone has succeeded.
+- **Unreachable remote**: nothing is changed.
+
+`myconfig git push` stages all changes, creates a date-stamped commit, and
+pushes. Use `-m "message"` to add a description to the commit.
+`myconfig git pull` pulls the latest from remote. You can also use regular
+git commands directly in `~/.config/myconfig/` for more control.
+
+> **Keep the remote private.** Everything you track ends up in it. Git does
+> not preserve file permissions either: `apply` keeps the permissions of a
+> file it overwrites, but files created on a fresh machine get default
+> permissions, so re-check modes on credential files such as `~/.netrc`.
 
 ## Working with Profiles
 
@@ -213,7 +234,7 @@ profiles:
   base:
     apps:
       apt: [git, curl]
-      cargo: [helix]
+      cargo: [zoxide]
     configs:
       - .bashrc
       - .gitconfig
@@ -234,7 +255,7 @@ profiles:
 ```
 
 When you apply the `work` profile, you get:
-- All apps from `base` (apt: git, curl; cargo: helix) + work apps (apt: docker, kubectl)
+- All apps from `base` (apt: git, curl; cargo: zoxide) + work apps (apt: docker, kubectl)
 - All configs from `base` (.bashrc, .gitconfig) + work configs (.kube/config)
 
 ## Package Managers
@@ -257,7 +278,7 @@ myconfig add app git
 myconfig add app curl
 
 # Specify different managers
-myconfig add app helix -m cargo      # Rust packages via cargo
+myconfig add app zoxide -m cargo     # Rust crates via cargo
 myconfig add app spotify-client -m snap
 myconfig add app typescript -m npm
 ```
@@ -271,7 +292,7 @@ profiles:
   base:
     apps:
       apt: [git, curl, htop]
-      cargo: [helix, ripgrep]
+      cargo: [zoxide, bat]
       snap:
         - spotify-client
         - node: "--classic"           # with extra parameters
@@ -297,6 +318,17 @@ Detected patterns include:
 - Files containing API keys, passwords, or private key blocks
 
 The warning is informational - you can still track these files, but be careful when exporting or sharing your configuration.
+
+## Security Notes
+
+- Only files under `$HOME` can be tracked, and tracked paths in
+  `config.yml` are validated, so a hand-edited or pulled `config.yml`
+  cannot make `apply` write outside `$HOME`.
+- Encrypted exports use OpenSSL AES-256-CBC with PBKDF2. The password is
+  passed to OpenSSL on stdin, never on its command line.
+- `import` validates the whole archive before writing anything: only
+  `config.yml` and regular files under `files/` are accepted (no links,
+  absolute paths or `..`), and file permissions are restored.
 
 ## File Locations
 
@@ -346,8 +378,18 @@ The warning is informational - you can still track these files, but be careful w
 
 - Python 3.10+
 - OpenSSL (for encrypted export/import)
-- Git (for git sync feature)
+- Git 2.28+ (for git sync feature)
+
+## Development
+
+```bash
+make test   # create .venv, install dev dependencies, run tests
+make lint   # run ruff
+```
+
+Tests run against an isolated `$HOME`, so they never touch your real
+configuration. See [DESIGN.md](DESIGN.md) for the design rationale.
 
 ## License
 
-MIT
+[MIT](LICENSE)

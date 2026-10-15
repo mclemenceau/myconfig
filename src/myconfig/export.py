@@ -1,6 +1,7 @@
 """Export and import functionality for myconfig."""
 
 import hashlib
+import os
 import subprocess
 import tarfile
 import tempfile
@@ -9,7 +10,39 @@ from pathlib import Path
 
 import click
 
-from .config import get_config_dir, get_config_path, get_files_dir
+from .config import (
+    get_config_dir,
+    get_config_path,
+    get_files_dir,
+    validate_relative,
+)
+
+
+def _openssl(args: list[str], password: str) -> subprocess.CompletedProcess:
+    """Run openssl enc, passing the password on stdin.
+
+    Passing it as an argument would expose it to other local users
+    through the process list.
+    """
+    return subprocess.run(
+        ["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-pass", "stdin",
+         *args],
+        input=password + "\n",
+        capture_output=True,
+        text=True,
+    )
+
+
+def _write_file(path: Path, data: bytes, mode: int) -> None:
+    """Write a file with the given permissions (e.g. 0600 for secrets).
+
+    The file is never readable with wider permissions, even briefly.
+    """
+    path.unlink(missing_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode & 0o777)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    os.chmod(path, mode & 0o777)  # O_CREAT mode is filtered by umask
 
 
 def create_archive(destination: Path, password: str) -> Path:
@@ -58,17 +91,10 @@ def create_archive(destination: Path, password: str) -> Path:
                         rel = str(file_path.relative_to(files_dir))
                         tar.add(file_path, arcname="files/" + rel)
 
-        # Encrypt with openssl (widely available)
-        # Using AES-256-CBC with PBKDF2
-        result = subprocess.run(
-            [
-                "openssl", "enc", "-aes-256-cbc", "-salt", "-pbkdf2",
-                "-in", str(tmp_path),
-                "-out", str(output_path),
-                "-pass", f"pass:{password}",
-            ],
-            capture_output=True,
-            text=True,
+        # Encrypt with openssl (widely available), AES-256-CBC with PBKDF2
+        result = _openssl(
+            ["-salt", "-in", str(tmp_path), "-out", str(output_path)],
+            password,
         )
 
         if result.returncode != 0:
@@ -115,15 +141,9 @@ def extract_archive(archive_path: Path, password: str) -> None:
 
     try:
         # Decrypt with openssl
-        result = subprocess.run(
-            [
-                "openssl", "enc", "-aes-256-cbc", "-d", "-pbkdf2",
-                "-in", str(archive_path),
-                "-out", str(tmp_path),
-                "-pass", f"pass:{password}",
-            ],
-            capture_output=True,
-            text=True,
+        result = _openssl(
+            ["-d", "-in", str(archive_path), "-out", str(tmp_path)],
+            password,
         )
 
         if result.returncode != 0:
@@ -132,37 +152,42 @@ def extract_archive(archive_path: Path, password: str) -> None:
             )
 
         # Extract tar.gz
-        config_dir.mkdir(parents=True, exist_ok=True)
+        files_dir = get_files_dir()
+        files_dir.mkdir(parents=True, exist_ok=True)
 
         with tarfile.open(tmp_path, "r:gz") as tar:
-            # Security: check for path traversal
-            for member in tar.getmembers():
-                if member.name.startswith("/") or ".." in member.name:
-                    raise click.ClickException(
-                        f"Archive contains unsafe path: {member.name}"
-                    )
-
-            # Extract config.yml
-            try:
-                tar.extract("config.yml", path=config_dir)
-                click.echo("  Extracted: config.yml")
-            except KeyError:
+            members = tar.getmembers()
+            if not any(m.name == "config.yml" for m in members):
                 click.secho("  Warning: no config.yml in archive", fg="yellow")
 
-            # Extract files
-            files_dir = get_files_dir()
-            files_dir.mkdir(parents=True, exist_ok=True)
-
-            for member in tar.getmembers():
-                if member.name.startswith("files/") and member.isfile():
-                    # Extract to files directory
-                    relative = member.name[6:]  # Remove "files/" prefix
+            # Validate everything before writing anything. Only regular
+            # files at known locations are accepted, which rejects links,
+            # devices and path traversal.
+            plan = []
+            for member in members:
+                if member.isdir():
+                    continue
+                if member.name == "config.yml":
+                    target = config_dir / "config.yml"
+                elif member.name.startswith("files/"):
+                    relative = validate_relative(member.name[len("files/"):])
                     target = files_dir / relative
-                    target.parent.mkdir(parents=True, exist_ok=True)
+                else:
+                    raise click.ClickException(
+                        f"Unexpected entry in archive: {member.name}"
+                    )
+                if not member.isfile():
+                    raise click.ClickException(
+                        f"Archive contains a non-regular file: {member.name}"
+                    )
+                plan.append((member, target))
 
-                    with tar.extractfile(member) as src:
-                        target.write_bytes(src.read())
-                    click.echo(f"  Extracted: {relative}")
+            for member, target in plan:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                _write_file(
+                    target, tar.extractfile(member).read(), member.mode
+                )
+                click.echo(f"  Extracted: {member.name}")
 
     finally:
         # Clean up temp file
